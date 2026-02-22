@@ -4,8 +4,8 @@ These units run the coder and reviewer agent daemons as **user** services (no ro
 
 ## Path and folder access
 
-- **WorkingDirectory** in each unit is set to `%h/cursor-scripts` (your home + `cursor-scripts`). The scripts resolve all repo paths (`.env`, `prompts/`, `agents.yaml`, `sessions/`, `transcripts/`, `memory_bank/`) from this directory. If your repo lives elsewhere, edit `WorkingDirectory` in the unit (or use a drop-in) so it points to the directory that contains `run_agent.py` and `.env`.
-- **PROJECT_ROOT** in `.env` is the project the agent operates on; it can be any path your user can read/write. When the service runs, it uses your user account, so access is the same as when you run the script by hand.
+- **WorkingDirectory** in each unit is set to `%h/cursor-scripts` (your home + `cursor-scripts`). The scripts resolve all repo paths (`.env`, `prompts/`, `agents.yaml`, `sessions/`, `transcripts/`, `memory_bank/`) from this directory. If your repo lives elsewhere, edit `WorkingDirectory` in the unit (or use a drop-in) so it points to the directory that contains `run_agent.py` and `.env`. Create `agents.yaml` from `agents.yaml.example` if needed.
+- **project_root** for each agent is set in `agents.yaml` (per-agent); it can be any path your user can read/write. When the service runs, it uses your user account, so access is the same as when you run the script by hand.
 
 ## Logs
 

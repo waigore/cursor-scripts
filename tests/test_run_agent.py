@@ -15,7 +15,7 @@ from run_agent import load_registry, run
 
 class TestLoadRegistry:
     def test_file_not_found_raises(self, tmp_path: Path):
-        with pytest.raises(FileNotFoundError, match="Registry not found"):
+        with pytest.raises(FileNotFoundError, match="agents.yaml not found"):
             load_registry(tmp_path / "missing.yaml")
 
     def test_empty_yaml_raises(self, tmp_path: Path):
@@ -42,34 +42,25 @@ class TestLoadRegistry:
 agents:
   coder:
     name: Coder
+    project_root: /my/project
     default_prompt_file: prompts/coder.md
-    prompt_file_env_key: PROMPT_FILE
-    default_sessions_dir: sessions
-    sessions_dir_env_key: SESSIONS_DIR
-    default_transcripts_dir: transcripts
-    transcripts_dir_env_key: TRANSCRIPTS_DIR
-    default_memory_bank_dir: memory_bank
-    memory_bank_dir_env_key: MEMORY_BANK_DIR
+    dir_prefix: ""
 """)
         registry = load_registry(yaml_path)
         assert "coder" in registry
         config, name = registry["coder"]
         assert name == "Coder"
         assert config.default_prompt_file == "prompts/coder.md"
+        assert config.project_root == "/my/project"
 
     def test_name_optional_uses_agent_id(self, tmp_path: Path):
         yaml_path = tmp_path / "agents.yaml"
         yaml_path.write_text("""
 agents:
   no_name_agent:
+    project_root: /p
     default_prompt_file: p.md
-    prompt_file_env_key: P
-    default_sessions_dir: s
-    sessions_dir_env_key: S
-    default_transcripts_dir: t
-    transcripts_dir_env_key: T
-    default_memory_bank_dir: m
-    memory_bank_dir_env_key: M
+    dir_prefix: ""
 """)
         registry = load_registry(yaml_path)
         _, name = registry["no_name_agent"]
@@ -83,14 +74,9 @@ class TestRunCLI:
 agents:
   coder:
     name: Coder
+    project_root: /p
     default_prompt_file: p.md
-    prompt_file_env_key: P
-    default_sessions_dir: s
-    sessions_dir_env_key: S
-    default_transcripts_dir: t
-    transcripts_dir_env_key: T
-    default_memory_bank_dir: m
-    memory_bank_dir_env_key: M
+    dir_prefix: ""
 """)
         with patch.object(run_agent, "REGISTRY_PATH", registry_yaml):
             with patch("sys.argv", ["run_agent.py", "--list-agents"]):
@@ -101,7 +87,7 @@ agents:
 
     def test_missing_agent_errors(self, tmp_path: Path):
         registry_yaml = tmp_path / "agents.yaml"
-        registry_yaml.write_text("agents:\n  coder:\n    name: C\n    default_prompt_file: p\n    prompt_file_env_key: P\n    default_sessions_dir: s\n    sessions_dir_env_key: S\n    default_transcripts_dir: t\n    transcripts_dir_env_key: T\n    default_memory_bank_dir: m\n    memory_bank_dir_env_key: M\n")
+        registry_yaml.write_text("agents:\n  coder:\n    name: C\n    project_root: /p\n    default_prompt_file: p\n    dir_prefix: \"\"\n")
         with patch.object(run_agent, "REGISTRY_PATH", registry_yaml):
             with patch("sys.argv", ["run_agent.py", "--agent", "nonexistent"]):
                 code = run()
@@ -115,7 +101,7 @@ agents:
 
     def test_missing_agent_flag_parser_error(self, tmp_path: Path):
         registry_yaml = tmp_path / "agents.yaml"
-        registry_yaml.write_text("agents:\n  coder:\n    name: C\n    default_prompt_file: p\n    prompt_file_env_key: P\n    default_sessions_dir: s\n    sessions_dir_env_key: S\n    default_transcripts_dir: t\n    transcripts_dir_env_key: T\n    default_memory_bank_dir: m\n    memory_bank_dir_env_key: M\n")
+        registry_yaml.write_text("agents:\n  coder:\n    name: C\n    project_root: /p\n    default_prompt_file: p\n    dir_prefix: \"\"\n")
         with patch.object(run_agent, "REGISTRY_PATH", registry_yaml):
             with patch("sys.argv", ["run_agent.py"]):
                 with pytest.raises(SystemExit):
@@ -127,14 +113,9 @@ agents:
 agents:
   coder:
     name: Coder
+    project_root: /my/project
     default_prompt_file: prompts/p.md
-    prompt_file_env_key: PROMPT_FILE
-    default_sessions_dir: sessions
-    sessions_dir_env_key: SESSIONS_DIR
-    default_transcripts_dir: transcripts
-    transcripts_dir_env_key: TRANSCRIPTS_DIR
-    default_memory_bank_dir: memory_bank
-    memory_bank_dir_env_key: MEMORY_BANK_DIR
+    dir_prefix: ""
 """)
         with patch.object(run_agent, "REGISTRY_PATH", registry_yaml):
             with patch("sys.argv", ["run_agent.py", "--agent", "coder"]):
@@ -144,4 +125,5 @@ agents:
         mock_main.assert_called_once()
         call_config = mock_main.call_args[0][0]
         assert call_config.default_prompt_file == "prompts/p.md"
+        assert call_config.project_root == "/my/project"
         assert "Coder" in mock_main.call_args[0][1]

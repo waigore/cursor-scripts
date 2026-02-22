@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Run the Cursor reviewer agent in the project directory, capture session logs to sessions_reviewer/,
-post-process to transcripts_reviewer/, then run a summarizer agent to update memory_bank_reviewer/state.md.
-Config via .env (required: PROJECT_ROOT). See .env.example.
-Uses its own memory bank (memory_bank_reviewer/), sessions (sessions_reviewer/), and transcripts (transcripts_reviewer/).
+Run the Cursor reviewer agent. Uses config from agents.yaml (project_root, prompt, dir_prefix).
+Global options in .env. Session/transcript/memory_bank dirs are shared base + dir_prefix.
 """
 
 from __future__ import annotations
@@ -11,24 +9,26 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from agent_runner_lib import AgentConfig, main
+from agent_runner_lib import main
+from run_agent import REGISTRY_PATH, load_registry
 
-REVIEWER_CONFIG = AgentConfig(
-    default_prompt_file="prompts/reviewer_prompt.md",
-    prompt_file_env_key="REVIEWER_PROMPT_FILE",
-    default_sessions_dir="sessions_reviewer",
-    sessions_dir_env_key="REVIEWER_SESSIONS_DIR",
-    default_transcripts_dir="transcripts_reviewer",
-    transcripts_dir_env_key="REVIEWER_TRANSCRIPTS_DIR",
-    default_memory_bank_dir="memory_bank_reviewer",
-    memory_bank_dir_env_key="REVIEWER_MEMORY_BANK_DIR",
-)
+SCRIPT_ROOT = Path(__file__).resolve().parent
+
 
 if __name__ == "__main__":
+    try:
+        registry = load_registry(REGISTRY_PATH)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"run_reviewer_agent: {e}", file=sys.stderr)
+        sys.exit(1)
+    if "reviewer" not in registry:
+        print("run_reviewer_agent: no 'reviewer' agent in registry", file=sys.stderr)
+        sys.exit(1)
+    config, name = registry["reviewer"]
     sys.exit(
         main(
-            REVIEWER_CONFIG,
-            "Run Cursor reviewer agent and optional summarizer.",
-            script_root_path=Path(__file__).resolve().parent,
+            config,
+            f"Run Cursor {name} agent and optional summarizer.",
+            script_root_path=SCRIPT_ROOT,
         )
     )

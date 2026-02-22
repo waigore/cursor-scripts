@@ -8,6 +8,9 @@ transcripts/
 .env.*
 !.env.example
 
+# Local agent registry (copy from agents.yaml.example)
+agents.yaml
+
 # Python
 .venv/
 venv/

@@ -94,68 +94,57 @@ class TestLoadEnv:
                 load_env(script_root, config)
             assert exc_info.value.code == 1
 
-    def test_exits_when_project_root_empty(self, script_root: Path, config: AgentConfig):
+    def test_exits_when_project_root_empty(self, script_root: Path):
+        config = AgentConfig(
+            project_root="",
+            default_prompt_file="prompts/agent_prompt.md",
+            dir_prefix="",
+        )
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": ""}, clear=False):
-                with pytest.raises(SystemExit) as exc_info:
-                    load_env(script_root, config)
-                assert exc_info.value.code == 1
+            with pytest.raises(SystemExit) as exc_info:
+                load_env(script_root, config)
+            assert exc_info.value.code == 1
 
     def test_returns_env_with_defaults(self, script_root: Path, config: AgentConfig):
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict(
-                "os.environ",
-                {
-                    "PROJECT_ROOT": "/my/project",
-                },
-                clear=False,
-            ):
-                env = load_env(script_root, config)
-            assert env["project_root"] == "/my/project"
+            env = load_env(script_root, config)
+            assert env["project_root"] == config.project_root
             assert "agent_cmd" in env
-            assert env["memory_bank_dir"] == config.default_memory_bank_dir
-            assert env["sessions_dir"] == config.default_sessions_dir
-            assert env["transcripts_dir"] == config.default_transcripts_dir
+            assert env["memory_bank_dir"] == "memory_bank"
+            assert env["sessions_dir"] == "sessions"
+            assert env["transcripts_dir"] == "transcripts"
             assert env["prompt_file"] == config.default_prompt_file
             assert env["base_branch"] == "dev"
             assert env["daemon_interval_sec"] == 3600
 
-    def test_uses_config_env_keys_for_overrides(self, script_root: Path):
+    def test_dir_prefix_applied_to_dirs(self, script_root: Path):
         config = AgentConfig(
+            project_root="/p",
             default_prompt_file="prompts/x.md",
-            prompt_file_env_key="X_PROMPT",
-            default_sessions_dir="sx",
-            sessions_dir_env_key="X_SESSIONS",
-            default_transcripts_dir="tx",
-            transcripts_dir_env_key="X_TRANSCRIPTS",
-            default_memory_bank_dir="mbx",
-            memory_bank_dir_env_key="X_MEMORY",
+            dir_prefix="reviewer",
         )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            env = load_env(script_root, config)
+            assert env["sessions_dir"] == "sessions_reviewer"
+            assert env["transcripts_dir"] == "transcripts_reviewer"
+            assert env["memory_bank_dir"] == "memory_bank_reviewer"
+            assert env["prompt_file"] == "prompts/x.md"
+
+    def test_env_base_dirs_used_when_set(self, script_root: Path, config: AgentConfig):
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
             with patch.dict(
                 "os.environ",
-                {
-                    "PROJECT_ROOT": "/p",
-                    "X_PROMPT": "custom/prompt.md",
-                    "X_SESSIONS": "custom_sessions",
-                    "X_TRANSCRIPTS": "custom_transcripts",
-                    "X_MEMORY": "custom_memory",
-                },
+                {"SESSIONS_DIR": "my_sessions", "TRANSCRIPTS_DIR": "my_transcripts", "MEMORY_BANK_DIR": "my_mb"},
                 clear=False,
             ):
                 env = load_env(script_root, config)
-            assert env["prompt_file"] == "custom/prompt.md"
-            assert env["sessions_dir"] == "custom_sessions"
-            assert env["transcripts_dir"] == "custom_transcripts"
-            assert env["memory_bank_dir"] == "custom_memory"
+            assert env["sessions_dir"] == "my_sessions"
+            assert env["transcripts_dir"] == "my_transcripts"
+            assert env["memory_bank_dir"] == "my_mb"
 
     def test_invalid_daemon_interval_uses_default(self, script_root: Path, config: AgentConfig):
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict(
-                "os.environ",
-                {"PROJECT_ROOT": "/p", "DAEMON_INTERVAL_SEC": "not_a_number"},
-                clear=False,
-            ):
+            with patch.dict("os.environ", {"DAEMON_INTERVAL_SEC": "not_a_number"}, clear=False):
                 env = load_env(script_root, config)
             assert env["daemon_interval_sec"] == 3600
 
@@ -450,16 +439,19 @@ class TestRunOneCycle:
                     )
         assert code == 0
 
+def _config_with_project_root(project_root: str, default_prompt_file: str = "prompts/agent_prompt.md") -> AgentConfig:
+    return AgentConfig(project_root=project_root, default_prompt_file=default_prompt_file, dir_prefix="")
+
+
 class TestMain:
-    def test_uses_lib_dir_when_script_root_path_none(self, config: AgentConfig, tmp_path: Path):
+    def test_uses_lib_dir_when_script_root_path_none(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
-                    with patch("sys.argv", ["prog"]):
-                        code = main(config, "Test", script_root_path=None)
+            with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
+                with patch("sys.argv", ["prog"]):
+                    code = main(config, "Test", script_root_path=None)
         assert code == 0
-        # script_root_path passed to run_one_cycle should be agent_runner_lib's parent
         call_kw = mock_cycle.call_args[1]
         assert call_kw["script_root_path"] is not None
 
@@ -470,29 +462,30 @@ class TestMain:
                 code = main(config, "Test", script_root_path=Path("/tmp"))
             assert code == 1
 
-    def test_returns_one_when_project_root_not_dir(self, config: AgentConfig, tmp_path: Path):
+    def test_returns_one_when_project_root_not_dir(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path / "nonexistent"))
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path / "nonexistent")}, clear=False):
-                with patch("sys.argv", ["prog"]):
-                    code = main(config, "Test", script_root_path=tmp_path)
-            assert code == 1
+            with patch("sys.argv", ["prog"]):
+                code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 1
 
-    def test_runs_one_cycle_by_default(self, config: AgentConfig, tmp_path: Path):
+    def test_runs_one_cycle_by_default(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         prompt_file = tmp_path / "prompts" / "agent_prompt.md"
         prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
-                    with patch("sys.argv", ["prog"]):
-                        code = main(config, "Test", script_root_path=tmp_path)
+            with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
+                with patch("sys.argv", ["prog"]):
+                    code = main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         mock_cycle.assert_called_once()
 
-    def test_summarize_only_uses_latest_transcript(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_uses_latest_transcript(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "transcripts").mkdir(exist_ok=True)
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
@@ -500,15 +493,15 @@ class TestMain:
         (tmp_path / "transcripts" / "latest.md").write_text("transcript")
         (tmp_path / "prompts" / "summarize_prompt.md").write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                    with patch("sys.argv", ["prog", "--summarize-only"]):
-                        code = main(config, "Test", script_root_path=tmp_path)
+            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                with patch("sys.argv", ["prog", "--summarize-only"]):
+                    code = main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         mock_sum.assert_called_once()
 
-    def test_summarize_only_with_explicit_transcript(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_with_explicit_transcript(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
         (tmp_path / "memory_bank" / "state.md").touch()
@@ -516,27 +509,27 @@ class TestMain:
         transcript.write_text("x")
         (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                    with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(transcript)]):
-                        code = main(config, "Test", script_root_path=tmp_path)
+            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(transcript)]):
+                    code = main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         mock_sum.assert_called_once()
 
-    def test_summarize_only_returns_one_when_no_transcript(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_returns_one_when_no_transcript(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "transcripts").mkdir(exist_ok=True)
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
         (tmp_path / "memory_bank" / "state.md").touch()
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("sys.argv", ["prog", "--summarize-only"]):
-                    code = main(config, "Test", script_root_path=tmp_path)
+            with patch("sys.argv", ["prog", "--summarize-only"]):
+                code = main(config, "Test", script_root_path=tmp_path)
         assert code == 1
 
-    def test_summarize_only_absolute_transcript_path(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_absolute_transcript_path(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
         (tmp_path / "memory_bank" / "state.md").touch()
@@ -544,41 +537,40 @@ class TestMain:
         abs_transcript.write_text("content")
         (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                    with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(abs_transcript)]):
-                        code = main(config, "Test", script_root_path=tmp_path)
+            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(abs_transcript)]):
+                    code = main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         mock_sum.assert_called_once()
 
-    def test_summarize_only_returns_one_when_transcript_file_missing(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_returns_one_when_transcript_file_missing(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
         (tmp_path / "memory_bank" / "state.md").touch()
         missing = tmp_path / "nonexistent.md"
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(missing)]):
-                    code = main(config, "Test", script_root_path=tmp_path)
+            with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(missing)]):
+                code = main(config, "Test", script_root_path=tmp_path)
         assert code == 1
 
-    def test_summarize_only_returns_one_when_summarize_prompt_missing(self, config: AgentConfig, tmp_path: Path):
+    def test_summarize_only_returns_one_when_summarize_prompt_missing(self, tmp_path: Path):
         from agent_runner_lib import main
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "transcripts").mkdir(exist_ok=True)
         (tmp_path / "transcripts" / "t.md").write_text("x")
         (tmp_path / "memory_bank").mkdir(exist_ok=True)
         (tmp_path / "memory_bank" / "state.md").touch()
-        # No prompts/summarize_prompt.md
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("sys.argv", ["prog", "--summarize-only"]):
-                    code = main(config, "Test", script_root_path=tmp_path)
+            with patch("sys.argv", ["prog", "--summarize-only"]):
+                code = main(config, "Test", script_root_path=tmp_path)
         assert code == 1
 
-    def test_daemon_uses_interval_arg(self, config: AgentConfig, tmp_path: Path):
+    def test_daemon_uses_interval_arg(self, tmp_path: Path):
         import agent_runner_lib
-        agent_runner_lib._shutdown_requested = False  # reset in case a prior test set it
+        agent_runner_lib._shutdown_requested = False
+        config = _config_with_project_root(str(tmp_path))
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "agent_prompt.md").write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
         cycles = []
@@ -587,11 +579,10 @@ class TestMain:
             agent_runner_lib._shutdown_requested = True
             return 0
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
-                with patch("agent_runner_lib.run_one_cycle", side_effect=set_shutdown):
-                    with patch("agent_runner_lib.time.sleep"):
-                        with patch("sys.argv", ["prog", "--daemon", "--interval", "120"]):
-                            code = agent_runner_lib.main(config, "Test", script_root_path=tmp_path)
+            with patch("agent_runner_lib.run_one_cycle", side_effect=set_shutdown):
+                with patch("agent_runner_lib.time.sleep"):
+                    with patch("sys.argv", ["prog", "--daemon", "--interval", "120"]):
+                        code = agent_runner_lib.main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         assert len(cycles) >= 1
 

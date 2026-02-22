@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Single CLI entrypoint for Cursor agents. Select agent by name via --agent.
-Registry: agents.yaml (prompt, sessions/transcripts/memory_bank per agent).
-Summarizer uses shared prompts/summarize_prompt.md. Config via .env (PROJECT_ROOT, etc.).
+Registry: agents.yaml (project_root, prompt, dir_prefix per agent). Global config in .env.
+Summarizer uses shared prompts/summarize_prompt.md.
 """
 
 from __future__ import annotations
@@ -21,7 +21,10 @@ REGISTRY_PATH = SCRIPT_ROOT / "agents.yaml"
 def load_registry(path: Path) -> dict[str, tuple[AgentConfig, str]]:
     """Load agents.yaml; return id -> (AgentConfig, display_name)."""
     if not path.is_file():
-        raise FileNotFoundError(f"Registry not found: {path}")
+        raise FileNotFoundError(
+            f"agents.yaml not found at {path}. "
+            "Copy agents.yaml.example to agents.yaml and set project_root for each agent."
+        )
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not raw or "agents" not in raw:
         raise ValueError("agents.yaml must contain an 'agents' mapping")

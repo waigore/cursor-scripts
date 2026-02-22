@@ -9,10 +9,9 @@ Runs Cursor agents against a project: each agent has its own prompt, memory bank
    uv sync
    ```
 
-2. **Config:** copy `.env.example` to `.env` and set:
-   - **`PROJECT_ROOT`** (required) — path to the repo where the agent runs (e.g. your app or codebase).
-
-   Other vars are optional (agent command, dirs, base branch, log level, daemon interval). Per-agent dirs and prompt can be overridden in `.env` using the keys in `agents.yaml`.
+2. **Config:**
+   - Copy `.env.example` to `.env`. All vars there are optional (agent command, base branch, daemon interval, log level, shared base dirs).
+   - Copy `agents.yaml.example` to `agents.yaml` and set **`project_root`** (and any other values) for each agent. `agents.yaml` is not shipped; the tool fails if it is missing.
 
 ## Usage
 
@@ -35,12 +34,12 @@ uv run run_agent.py -a coder --summarize-only [--transcript path/to/transcript.m
 
 ## Agent registry
 
-Agents are defined in **`agents.yaml`**. Each entry has a unique **id** (used with `--agent`) and:
+Agents are defined in **`agents.yaml`** (create it by copying **`agents.yaml.example`**). Each entry has a unique **id** (used with `--agent`) and:
 
 - **name** — display label
+- **project_root** — (required) path to the repo where this agent runs
 - **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`)
-- **default_sessions_dir**, **default_transcripts_dir**, **default_memory_bank_dir** — dirs under this repo
-- **\*_env_key** — env var names to override those dirs and the prompt file (see `.env.example`)
+- **dir_prefix** — suffix for this agent’s sessions/transcripts/memory_bank dirs (e.g. `"reviewer"` → `sessions_reviewer`)
 
 Summarization uses the shared **`prompts/summarize_prompt.md`** for all agents.
 

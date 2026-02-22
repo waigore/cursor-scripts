@@ -51,16 +51,11 @@ PROMPT_FILE_THRESHOLD = 100_000
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Per-agent config: prompt, sessions/transcripts/memory_bank dirs and their env keys."""
+    """Per-agent config: project root, prompt file, and dir prefix for sessions/transcripts/memory_bank."""
 
+    project_root: str
     default_prompt_file: str
-    prompt_file_env_key: str = "PROMPT_FILE"
-    default_sessions_dir: str = "sessions"
-    sessions_dir_env_key: str = "SESSIONS_DIR"
-    default_transcripts_dir: str = "transcripts"
-    transcripts_dir_env_key: str = "TRANSCRIPTS_DIR"
-    default_memory_bank_dir: str = "memory_bank"
-    memory_bank_dir_env_key: str = "MEMORY_BANK_DIR"
+    dir_prefix: str = ""
 
 
 def script_root(caller_file: str) -> Path:
@@ -84,6 +79,13 @@ def setup_logging(log_level: str) -> None:
     )
 
 
+def _dir_with_prefix(base: str, dir_prefix: str) -> str:
+    """Compute per-agent dir from shared base and agent dir_prefix (e.g. base='sessions', prefix='reviewer' -> 'sessions_reviewer')."""
+    if not dir_prefix:
+        return base
+    return f"{base}_{dir_prefix}"
+
+
 def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int]:
     if load_dotenv is None:
         logging.error("python-dotenv is not installed; run: uv sync")
@@ -93,26 +95,25 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         logging.warning(".env file not found at %s", env_path)
     else:
         load_dotenv(env_path)
-    project_root = os.environ.get("PROJECT_ROOT", "").strip()
+    project_root = (config.project_root or "").strip()
     if not project_root:
-        logging.error("PROJECT_ROOT is required; set it in .env (see .env.example)")
+        logging.error("project_root is required for this agent; set it in agents.yaml")
         sys.exit(1)
     raw_interval = os.environ.get("DAEMON_INTERVAL_SEC", str(DEFAULT_DAEMON_INTERVAL_SEC)).strip()
     try:
         daemon_interval_sec = int(raw_interval)
     except ValueError:
         daemon_interval_sec = DEFAULT_DAEMON_INTERVAL_SEC
+    base_sessions = os.environ.get("SESSIONS_DIR", "sessions").strip() or "sessions"
+    base_transcripts = os.environ.get("TRANSCRIPTS_DIR", "transcripts").strip() or "transcripts"
+    base_memory_bank = os.environ.get("MEMORY_BANK_DIR", "memory_bank").strip() or "memory_bank"
     return {
         "project_root": project_root,
         "agent_cmd": os.environ.get("AGENT_CMD", DEFAULT_AGENT_CMD).strip() or DEFAULT_AGENT_CMD,
-        "memory_bank_dir": os.environ.get(config.memory_bank_dir_env_key, config.default_memory_bank_dir).strip()
-        or config.default_memory_bank_dir,
-        "sessions_dir": os.environ.get(config.sessions_dir_env_key, config.default_sessions_dir).strip()
-        or config.default_sessions_dir,
-        "transcripts_dir": os.environ.get(config.transcripts_dir_env_key, config.default_transcripts_dir).strip()
-        or config.default_transcripts_dir,
-        "prompt_file": os.environ.get(config.prompt_file_env_key, config.default_prompt_file).strip()
-        or config.default_prompt_file,
+        "memory_bank_dir": _dir_with_prefix(base_memory_bank, config.dir_prefix),
+        "sessions_dir": _dir_with_prefix(base_sessions, config.dir_prefix),
+        "transcripts_dir": _dir_with_prefix(base_transcripts, config.dir_prefix),
+        "prompt_file": config.default_prompt_file,
         "base_branch": os.environ.get("BASE_BRANCH", DEFAULT_BASE_BRANCH).strip() or DEFAULT_BASE_BRANCH,
         "log_level": os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).strip() or DEFAULT_LOG_LEVEL,
         "daemon_interval_sec": daemon_interval_sec,
