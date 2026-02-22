@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Run the Cursor coder agent. Uses config from agents.yaml (project_root, prompt, dir_prefix).
-Global options in .env. Session/transcript/memory_bank dirs are shared base + dir_prefix.
+Global options in .env. All agents share sessions/, transcripts/, memory_bank/; files are named with dir_prefix.
 """
 
 from __future__ import annotations

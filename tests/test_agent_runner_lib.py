@@ -113,11 +113,12 @@ class TestLoadEnv:
             assert env["memory_bank_dir"] == "memory_bank"
             assert env["sessions_dir"] == "sessions"
             assert env["transcripts_dir"] == "transcripts"
+            assert env["dir_prefix"] == ""
             assert env["prompt_file"] == config.default_prompt_file
             assert env["base_branch"] == "dev"
-            assert env["daemon_interval_sec"] == 3600
+            assert env["daemon_interval_sec"] == 60
 
-    def test_dir_prefix_applied_to_dirs(self, script_root: Path):
+    def test_dir_prefix_in_env_shared_dirs(self, script_root: Path):
         config = AgentConfig(
             project_root="/p",
             default_prompt_file="prompts/x.md",
@@ -125,9 +126,10 @@ class TestLoadEnv:
         )
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
             env = load_env(script_root, config)
-            assert env["sessions_dir"] == "sessions_reviewer"
-            assert env["transcripts_dir"] == "transcripts_reviewer"
-            assert env["memory_bank_dir"] == "memory_bank_reviewer"
+            assert env["sessions_dir"] == "sessions"
+            assert env["transcripts_dir"] == "transcripts"
+            assert env["memory_bank_dir"] == "memory_bank"
+            assert env["dir_prefix"] == "reviewer"
             assert env["prompt_file"] == "prompts/x.md"
 
     def test_env_base_dirs_used_when_set(self, script_root: Path, config: AgentConfig):
@@ -146,7 +148,7 @@ class TestLoadEnv:
         with patch("agent_runner_lib.load_dotenv", MagicMock()):
             with patch.dict("os.environ", {"DAEMON_INTERVAL_SEC": "not_a_number"}, clear=False):
                 env = load_env(script_root, config)
-            assert env["daemon_interval_sec"] == 3600
+            assert env["daemon_interval_sec"] == 60
 
 
 class TestEnsureDirsAndState:
@@ -350,7 +352,15 @@ class TestLatestTranscript:
         td.mkdir()
         only = td / "one.md"
         only.write_text("x")
-        assert latest_transcript(td, log) == only
+        assert latest_transcript(td, log, "") == only
+
+    def test_returns_prefixed_file_when_dir_prefix_set(self, script_root: Path, log):
+        td = script_root / "transcripts"
+        td.mkdir()
+        prefixed = td / "2026-02-22_12-00-00_reviewer.md"
+        prefixed.write_text("x")
+        assert latest_transcript(td, log, "reviewer") == prefixed
+        assert latest_transcript(td, log, "other") is None
 
     def test_returns_most_recent_by_mtime(self, script_root: Path, log):
         td = script_root / "transcripts"
@@ -363,7 +373,7 @@ class TestLatestTranscript:
         old_f.touch()
         time.sleep(0.02)
         new_f.touch()  # new_f is now most recent
-        latest = latest_transcript(td, log)
+        latest = latest_transcript(td, log, "")
         assert latest is not None
         assert latest.name == "new.md"
 
@@ -398,6 +408,7 @@ class TestRunOneCycle:
             prompt_file=prompt_file,
             summarize_prompt_file=summarize_file,
             log=log,
+            dir_prefix="",
         )
         assert code == 1
 
@@ -436,6 +447,7 @@ class TestRunOneCycle:
                         prompt_file=prompt_file,
                         summarize_prompt_file=summarize_file,
                         log=log,
+                        dir_prefix="",
                     )
         assert code == 0
 

@@ -26,7 +26,7 @@ uv run run_agent.py --agent coder
 uv run run_agent.py -a reviewer
 
 # Daemon: loop every N seconds (default: DAEMON_INTERVAL_SEC from .env)
-uv run run_agent.py -a coder --daemon [--interval 3600]
+uv run run_agent.py -a coder --daemon [--interval 60]
 
 # Only run summarizer on an existing transcript
 uv run run_agent.py -a coder --summarize-only [--transcript path/to/transcript.md]
@@ -39,7 +39,7 @@ Agents are defined in **`agents.yaml`** (create it by copying **`agents.yaml.exa
 - **name** — display label
 - **project_root** — (required) path to the repo where this agent runs
 - **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`)
-- **dir_prefix** — suffix for this agent’s sessions/transcripts/memory_bank dirs (e.g. `"reviewer"` → `sessions_reviewer`)
+- **dir_prefix** — used for this agent’s file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
 
 Summarization uses the shared **`prompts/summarize_prompt.md`** for all agents.
 

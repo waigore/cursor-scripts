@@ -1,6 +1,6 @@
 """
 Shared logic for running Cursor agent scripts (run_coder_agent, run_reviewer_agent, etc.).
-Each script uses its own prompt, sessions/transcripts dirs, and memory bank instance.
+All agents share sessions/, transcripts/, and memory_bank/; per-agent files are named with dir_prefix.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ DEFAULT_AGENT_CMD = "agent -p --force --model auto --approve-mcps --output-forma
 DEFAULT_SUMMARIZE_PROMPT_FILE = "prompts/summarize_prompt.md"
 DEFAULT_BASE_BRANCH = "dev"
 DEFAULT_LOG_LEVEL = "INFO"
-DEFAULT_DAEMON_INTERVAL_SEC = 3600
+DEFAULT_DAEMON_INTERVAL_SEC = 60
 TIMESTAMP_FMT = "%Y-%m-%d_%H-%M-%S"
 PROMPT_FILE_THRESHOLD = 100_000
 
@@ -79,13 +79,6 @@ def setup_logging(log_level: str) -> None:
     )
 
 
-def _dir_with_prefix(base: str, dir_prefix: str) -> str:
-    """Compute per-agent dir from shared base and agent dir_prefix (e.g. base='sessions', prefix='reviewer' -> 'sessions_reviewer')."""
-    if not dir_prefix:
-        return base
-    return f"{base}_{dir_prefix}"
-
-
 def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int]:
     if load_dotenv is None:
         logging.error("python-dotenv is not installed; run: uv sync")
@@ -110,9 +103,10 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
     return {
         "project_root": project_root,
         "agent_cmd": os.environ.get("AGENT_CMD", DEFAULT_AGENT_CMD).strip() or DEFAULT_AGENT_CMD,
-        "memory_bank_dir": _dir_with_prefix(base_memory_bank, config.dir_prefix),
-        "sessions_dir": _dir_with_prefix(base_sessions, config.dir_prefix),
-        "transcripts_dir": _dir_with_prefix(base_transcripts, config.dir_prefix),
+        "memory_bank_dir": base_memory_bank,
+        "sessions_dir": base_sessions,
+        "transcripts_dir": base_transcripts,
+        "dir_prefix": config.dir_prefix,
         "prompt_file": config.default_prompt_file,
         "base_branch": os.environ.get("BASE_BRANCH", DEFAULT_BASE_BRANCH).strip() or DEFAULT_BASE_BRANCH,
         "log_level": os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).strip() or DEFAULT_LOG_LEVEL,
@@ -296,9 +290,12 @@ def run_parser(script_root_path: Path, session_path: Path, transcript_path: Path
     return 0
 
 
-def latest_transcript(transcripts_dir: Path, log: logging.Logger) -> Path | None:
-    """Return the path to the most recently modified .md file in transcripts_dir, or None."""
-    md_files = list(transcripts_dir.glob("*.md"))
+def latest_transcript(
+    transcripts_dir: Path, log: logging.Logger, dir_prefix: str = ""
+) -> Path | None:
+    """Return the path to the most recently modified .md file in transcripts_dir for this agent, or None."""
+    pattern = f"*_{dir_prefix}.md" if dir_prefix else "*.md"
+    md_files = list(transcripts_dir.glob(pattern))
     if not md_files:
         return None
     latest = max(md_files, key=lambda p: p.stat().st_mtime)
@@ -318,6 +315,7 @@ def run_one_cycle(
     prompt_file: Path,
     summarize_prompt_file: Path,
     log: logging.Logger,
+    dir_prefix: str = "",
 ) -> int:
     """Run one full cycle: agent, parse session log, then summarizer. Returns exit code."""
     state_content = read_state(state_file, log)
@@ -326,8 +324,10 @@ def run_one_cycle(
         return 1
     main_prompt = build_main_prompt(prompt_file, state_file, state_content, str(env["base_branch"]), log)
     timestamp = datetime.now().strftime(TIMESTAMP_FMT)
-    session_path = sessions_dir / f"{timestamp}.jsonl"
-    transcript_path = transcripts_dir / f"{timestamp}.md"
+    session_suffix = f"{timestamp}_{dir_prefix}.jsonl" if dir_prefix else f"{timestamp}.jsonl"
+    transcript_suffix = f"{timestamp}_{dir_prefix}.md" if dir_prefix else f"{timestamp}.md"
+    session_path = sessions_dir / session_suffix
+    transcript_path = transcripts_dir / transcript_suffix
 
     exit_code = run_agent(str(env["agent_cmd"]), main_prompt, project_root, session_path, log)
     if _shutdown_requested:
@@ -403,7 +403,8 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
     memory_bank_dir = resolve_path(str(env["memory_bank_dir"]), script_root_path)
     sessions_dir = resolve_path(str(env["sessions_dir"]), script_root_path)
     transcripts_dir = resolve_path(str(env["transcripts_dir"]), script_root_path)
-    state_file = memory_bank_dir / "state.md"
+    dir_prefix = str(env.get("dir_prefix", ""))
+    state_file = memory_bank_dir / ("state.md" if not dir_prefix else f"state_{dir_prefix}.md")
     prompt_file = resolve_path(str(env["prompt_file"]), script_root_path)
     summarize_prompt_file = resolve_path(DEFAULT_SUMMARIZE_PROMPT_FILE, script_root_path)
 
@@ -446,6 +447,7 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
                 prompt_file=prompt_file,
                 summarize_prompt_file=summarize_prompt_file,
                 log=log,
+                dir_prefix=dir_prefix,
             )
             if _shutdown_requested:
                 break
@@ -468,7 +470,7 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
                 log.error("Transcript file not found: %s", transcript_path)
                 return 1
         else:
-            transcript_path = latest_transcript(transcripts_dir, log)
+            transcript_path = latest_transcript(transcripts_dir, log, dir_prefix)
             if transcript_path is None:
                 log.error("No transcript found in %s; specify --transcript PATH", transcripts_dir)
                 return 1
@@ -490,4 +492,5 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
         prompt_file=prompt_file,
         summarize_prompt_file=summarize_prompt_file,
         log=log,
+        dir_prefix=dir_prefix,
     )

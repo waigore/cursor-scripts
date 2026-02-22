@@ -2,7 +2,7 @@
 # agents.yaml is not shipped; the tool fails if it is missing.
 #
 # Agent registry: unique id -> config. Use run_agent.py --agent <id>.
-# Per-agent: project_root (required), prompt file, dir_prefix for sessions/transcripts/memory_bank.
+# Per-agent: project_root (required), prompt file, dir_prefix to distinguish this agent's files in shared sessions/transcripts/memory_bank.
 # Summarization uses the shared prompts/summarize_prompt.md.
 
 agents:
