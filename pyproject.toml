@@ -1,9 +1,29 @@
 [project]
 name = "cursor-scripts"
 version = "0.1.0"
-description = "Run Cursor agent, parse session logs, and run summarizer to update memory bank."
+description = "Run Cursor agents with per-agent prompts and memory banks"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1.0.0",
+    "PyYAML>=6.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["agent_runner_lib.py", "run_agent.py"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true

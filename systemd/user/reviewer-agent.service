@@ -1,0 +1,32 @@
+# Cursor reviewer agent daemon (user service)
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/user/reviewer-agent.service ~/.config/systemd/user/
+#   # If cursor-scripts is not in ~/cursor-scripts, edit WorkingDirectory below (or use a drop-in)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now reviewer-agent.service
+#
+# Logs: ~/.local/log/cursor-agent/reviewer-agent.log
+# Status: systemctl --user status reviewer-agent.service
+# Journal: journalctl --user -u reviewer-agent.service -f
+
+[Unit]
+Description=Cursor reviewer agent daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Must be the directory containing run_agent.py and .env (script resolves paths from here)
+WorkingDirectory=%h/cursor-scripts
+ExecStartPre=-/bin/mkdir -p %h/.local/log/cursor-agent
+# Use project venv if present (after uv sync), else override with drop-in
+ExecStart=%h/cursor-scripts/.venv/bin/python run_agent.py --agent reviewer --daemon
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/log/cursor-agent/reviewer-agent.log
+StandardError=append:%h/.local/log/cursor-agent/reviewer-agent.log
+
+[Install]
+WantedBy=default.target

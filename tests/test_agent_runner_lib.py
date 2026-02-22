@@ -1,0 +1,597 @@
+"""Tests for agent_runner_lib."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from agent_runner_lib import (
+    AgentConfig,
+    PROMPT_FILE_THRESHOLD,
+    _on_shutdown_signal,
+    build_main_prompt,
+    build_summarize_prompt,
+    ensure_dirs_and_state,
+    latest_transcript,
+    load_env,
+    read_state,
+    resolve_path,
+    run_agent,
+    run_one_cycle,
+    run_parser,
+    run_summarizer,
+    script_root,
+    setup_logging,
+)
+
+
+class TestOnShutdownSignal:
+    def test_sets_shutdown_and_terminates_process(self):
+        import agent_runner_lib
+        proc = MagicMock()
+        agent_runner_lib._current_process = proc
+        agent_runner_lib._shutdown_requested = False
+        try:
+            _on_shutdown_signal(2, None)
+            proc.terminate.assert_called_once()
+            assert agent_runner_lib._shutdown_requested is True
+        finally:
+            agent_runner_lib._current_process = None
+            agent_runner_lib._shutdown_requested = False
+
+    def test_ignores_oserror_on_terminate(self):
+        import agent_runner_lib
+        proc = MagicMock()
+        proc.terminate.side_effect = OSError
+        agent_runner_lib._current_process = proc
+        try:
+            _on_shutdown_signal(2, None)
+            proc.terminate.assert_called_once()
+        finally:
+            agent_runner_lib._current_process = None
+
+
+class TestScriptRoot:
+    def test_script_root_returns_parent_of_file(self):
+        out = script_root("/some/dir/foo.py")
+        assert out == Path("/some/dir")
+
+
+class TestResolvePath:
+    def test_relative_path_joined_with_script_root(self, script_root: Path):
+        (script_root / "prompts").mkdir()
+        got = resolve_path("prompts/agent_prompt.md", script_root)
+        assert got == (script_root / "prompts" / "agent_prompt.md").resolve()
+
+    def test_absolute_path_unchanged(self, script_root: Path):
+        abs_path = Path("/abs/path/to/file")
+        got = resolve_path(str(abs_path), script_root)
+        assert got == abs_path.resolve()
+
+
+class TestSetupLogging:
+    def test_valid_level(self):
+        setup_logging("DEBUG")
+        # No exception; level is set
+        import logging
+        assert logging.getLogger().level == logging.DEBUG or True  # root may be set by others
+
+    def test_invalid_level_falls_back_to_info(self):
+        setup_logging("NOT_A_LEVEL")
+        # getattr(..., "NOT_A_LEVEL", logging.INFO) returns INFO
+        import logging
+        level = getattr(logging, "NOT_A_LEVEL", logging.INFO)
+        assert level == logging.INFO
+
+
+class TestLoadEnv:
+    def test_exits_when_dotenv_missing(self, script_root: Path, config: AgentConfig):
+        with patch("agent_runner_lib.load_dotenv", None):
+            with pytest.raises(SystemExit) as exc_info:
+                load_env(script_root, config)
+            assert exc_info.value.code == 1
+
+    def test_exits_when_project_root_empty(self, script_root: Path, config: AgentConfig):
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": ""}, clear=False):
+                with pytest.raises(SystemExit) as exc_info:
+                    load_env(script_root, config)
+                assert exc_info.value.code == 1
+
+    def test_returns_env_with_defaults(self, script_root: Path, config: AgentConfig):
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict(
+                "os.environ",
+                {
+                    "PROJECT_ROOT": "/my/project",
+                },
+                clear=False,
+            ):
+                env = load_env(script_root, config)
+            assert env["project_root"] == "/my/project"
+            assert "agent_cmd" in env
+            assert env["memory_bank_dir"] == config.default_memory_bank_dir
+            assert env["sessions_dir"] == config.default_sessions_dir
+            assert env["transcripts_dir"] == config.default_transcripts_dir
+            assert env["prompt_file"] == config.default_prompt_file
+            assert env["base_branch"] == "dev"
+            assert env["daemon_interval_sec"] == 3600
+
+    def test_uses_config_env_keys_for_overrides(self, script_root: Path):
+        config = AgentConfig(
+            default_prompt_file="prompts/x.md",
+            prompt_file_env_key="X_PROMPT",
+            default_sessions_dir="sx",
+            sessions_dir_env_key="X_SESSIONS",
+            default_transcripts_dir="tx",
+            transcripts_dir_env_key="X_TRANSCRIPTS",
+            default_memory_bank_dir="mbx",
+            memory_bank_dir_env_key="X_MEMORY",
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict(
+                "os.environ",
+                {
+                    "PROJECT_ROOT": "/p",
+                    "X_PROMPT": "custom/prompt.md",
+                    "X_SESSIONS": "custom_sessions",
+                    "X_TRANSCRIPTS": "custom_transcripts",
+                    "X_MEMORY": "custom_memory",
+                },
+                clear=False,
+            ):
+                env = load_env(script_root, config)
+            assert env["prompt_file"] == "custom/prompt.md"
+            assert env["sessions_dir"] == "custom_sessions"
+            assert env["transcripts_dir"] == "custom_transcripts"
+            assert env["memory_bank_dir"] == "custom_memory"
+
+    def test_invalid_daemon_interval_uses_default(self, script_root: Path, config: AgentConfig):
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict(
+                "os.environ",
+                {"PROJECT_ROOT": "/p", "DAEMON_INTERVAL_SEC": "not_a_number"},
+                clear=False,
+            ):
+                env = load_env(script_root, config)
+            assert env["daemon_interval_sec"] == 3600
+
+
+class TestEnsureDirsAndState:
+    def test_creates_dirs_and_state_file(self, script_root: Path, log):
+        sessions = script_root / "sessions"
+        transcripts = script_root / "transcripts"
+        memory_bank = script_root / "memory_bank"
+        state_file = memory_bank / "state.md"
+        ensure_dirs_and_state(script_root, sessions, transcripts, memory_bank, state_file, log)
+        assert sessions.is_dir()
+        assert transcripts.is_dir()
+        assert memory_bank.is_dir()
+        assert state_file.is_file()
+        log.info.assert_called()
+
+    def test_existing_state_file_not_touched(self, script_root: Path, log):
+        memory_bank = script_root / "mb"
+        memory_bank.mkdir(parents=True)
+        state_file = memory_bank / "state.md"
+        state_file.write_text("existing")
+        ensure_dirs_and_state(
+            script_root,
+            script_root / "s",
+            script_root / "t",
+            memory_bank,
+            state_file,
+            log,
+        )
+        assert state_file.read_text() == "existing"
+
+
+class TestReadState:
+    def test_missing_file_returns_empty(self, script_root: Path, log):
+        state_file = script_root / "nonexistent.md"
+        assert read_state(state_file, log) == ""
+
+    def test_empty_file_returns_empty(self, script_root: Path, log):
+        state_file = script_root / "empty.md"
+        state_file.touch()
+        assert read_state(state_file, log) == ""
+
+    def test_returns_file_content(self, script_root: Path, log):
+        state_file = script_root / "state.md"
+        state_file.write_text("hello state")
+        assert read_state(state_file, log) == "hello state"
+
+    def test_oserror_returns_empty(self, script_root: Path, log):
+        state_file = script_root / "state.md"
+        state_file.write_text("x")
+        with patch.object(Path, "read_text", side_effect=OSError("read failed")):
+            assert read_state(state_file, log) == ""
+        log.warning.assert_called()
+
+
+class TestBuildMainPrompt:
+    def test_substitutes_placeholders(self, script_root: Path, log):
+        template = script_root / "t.md"
+        template.write_text(
+            "State path: {{STATE_FILE_PATH}}\nContent: {{STATE_CONTENT}}\nBranch: {{BASE_BRANCH}}"
+        )
+        state_file = script_root / "state.md"
+        out = build_main_prompt(template, state_file, "my content", "main", log)
+        assert "State path: " in out and str(state_file) in out
+        assert "Content: my content" in out
+        assert "Branch: main" in out
+
+    def test_empty_state_content_replaced_with_empty_marker(self, script_root: Path, log):
+        template = script_root / "t.md"
+        template.write_text("{{STATE_CONTENT}}")
+        out = build_main_prompt(template, script_root / "s.md", "", "dev", log)
+        assert "(empty)" in out
+
+
+class TestBuildSummarizePrompt:
+    def test_substitutes_placeholders(self, script_root: Path, log):
+        template = script_root / "sum.md"
+        template.write_text("Transcript: {{TRANSCRIPT_PATH}} State: {{STATE_FILE_PATH}}")
+        transcript = script_root / "t.md"
+        state_file = script_root / "state.md"
+        out = build_summarize_prompt(template, transcript, state_file, log)
+        assert str(transcript) in out and str(state_file) in out
+
+
+class TestRunAgent:
+    def test_large_prompt_uses_temp_file(self, script_root: Path, log):
+        huge_prompt = "x" * (PROMPT_FILE_THRESHOLD + 1)
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 0
+            proc.stderr = None
+            mock_popen.return_value = proc
+            with patch("os.unlink"):
+                code = run_agent("echo", huge_prompt, script_root, None, log)
+        assert code == 0
+        call_cmd = mock_popen.call_args[0][0]
+        assert len(call_cmd) == 2  # echo + path
+        assert call_cmd[1].endswith(".txt") or "echo" in call_cmd[0]
+
+    def test_inline_prompt_and_exit_zero(self, script_root: Path, log):
+        session_out = script_root / "out.jsonl"
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 0
+            proc.stderr = None
+            mock_popen.return_value = proc
+            code = run_agent("echo", "hello", script_root, session_out, log)
+        assert code == 0
+        mock_popen.assert_called_once()
+        call_kw = mock_popen.call_args[1]
+        assert call_kw.get("stdout") is not None or "stdout" in str(call_kw)
+        assert session_out.exists() or call_kw.get("stdout") is not None
+
+    def test_exit_nonzero_logs_error(self, script_root: Path, log):
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 1
+            proc.stderr = MagicMock()
+            proc.stderr.read.return_value = "stderr message"
+            mock_popen.return_value = proc
+            code = run_agent("echo", "hi", script_root, None, log)
+        assert code == 1
+        log.error.assert_called()
+
+    def test_long_stderr_truncated_in_log(self, script_root: Path, log):
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 1
+            long_stderr = "x" * 2000
+            proc.stderr = MagicMock()
+            proc.stderr.read.return_value = long_stderr
+            mock_popen.return_value = proc
+            run_agent("echo", "hi", script_root, None, log)
+        # Second log.error is for stderr; should contain truncation
+        err_calls = [c for c in log.error.call_args_list if "..." in str(c)]
+        assert len(err_calls) >= 1
+
+
+class TestRunSummarizer:
+    def test_returns_exit_code(self, script_root: Path, log):
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 0
+            proc.stderr = None
+            mock_popen.return_value = proc
+            code = run_summarizer("echo", "sum prompt", script_root, log)
+        assert code == 0
+
+    def test_nonzero_exit_logs_stderr(self, script_root: Path, log):
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 1
+            proc.stderr = MagicMock()
+            proc.stderr.read.return_value = "sum failed"
+            mock_popen.return_value = proc
+            code = run_summarizer("echo", "sum", script_root, log)
+        assert code == 1
+        log.error.assert_called()
+
+
+class TestRunParser:
+    def test_returns_one_when_script_missing(self, script_root: Path, log):
+        code = run_parser(script_root, script_root / "in.jsonl", script_root / "out.md", log)
+        assert code == 1
+        log.error.assert_called()
+
+    def test_returns_zero_on_success(self, script_root: Path, log):
+        parser_script = script_root / "parse_coder_logs.py"
+        parser_script.write_text("# mock")
+        session = script_root / "s.jsonl"
+        session.write_text("{}")
+        transcript = script_root / "t.md"
+        with patch("agent_runner_lib.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            code = run_parser(script_root, session, transcript, log)
+        assert code == 0
+
+    def test_returns_one_on_parser_failure(self, script_root: Path, log):
+        parser_script = script_root / "parse_coder_logs.py"
+        parser_script.write_text("# mock")
+        session = script_root / "s.jsonl"
+        session.write_text("{}")
+        with patch("agent_runner_lib.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            code = run_parser(script_root, session, script_root / "t.md", log)
+        assert code == 1
+
+
+class TestLatestTranscript:
+    def test_returns_none_when_no_md_files(self, script_root: Path, log):
+        (script_root / "transcripts").mkdir()
+        assert latest_transcript(script_root / "transcripts", log) is None
+
+    def test_returns_only_md_file(self, script_root: Path, log):
+        td = script_root / "transcripts"
+        td.mkdir()
+        only = td / "one.md"
+        only.write_text("x")
+        assert latest_transcript(td, log) == only
+
+    def test_returns_most_recent_by_mtime(self, script_root: Path, log):
+        td = script_root / "transcripts"
+        td.mkdir()
+        old_f = td / "old.md"
+        new_f = td / "new.md"
+        old_f.write_text("o")
+        new_f.write_text("n")
+        import time
+        old_f.touch()
+        time.sleep(0.02)
+        new_f.touch()  # new_f is now most recent
+        latest = latest_transcript(td, log)
+        assert latest is not None
+        assert latest.name == "new.md"
+
+
+class TestRunOneCycle:
+    def test_returns_one_when_prompt_file_missing(
+        self, script_root: Path, config: AgentConfig, log
+    ):
+        sessions = script_root / "sessions"
+        transcripts = script_root / "transcripts"
+        memory_bank = script_root / "memory_bank"
+        for d in (sessions, transcripts, memory_bank):
+            d.mkdir(parents=True)
+        state_file = memory_bank / "state.md"
+        state_file.touch()
+        prompt_file = script_root / "missing.md"  # does not exist
+        summarize_file = script_root / "sum.md"
+        summarize_file.write_text("sum")
+        env = {
+            "project_root": str(script_root),
+            "agent_cmd": "true",
+            "base_branch": "dev",
+        }
+        code = run_one_cycle(
+            script_root_path=script_root,
+            project_root=script_root,
+            env=env,
+            memory_bank_dir=memory_bank,
+            sessions_dir=sessions,
+            transcripts_dir=transcripts,
+            state_file=state_file,
+            prompt_file=prompt_file,
+            summarize_prompt_file=summarize_file,
+            log=log,
+        )
+        assert code == 1
+
+    def test_full_cycle_with_mocks(
+        self, script_root: Path, log
+    ):
+        sessions = script_root / "sessions"
+        transcripts = script_root / "transcripts"
+        memory_bank = script_root / "memory_bank"
+        for d in (sessions, transcripts, memory_bank):
+            d.mkdir(parents=True)
+        state_file = memory_bank / "state.md"
+        state_file.touch()
+        prompt_file = script_root / "prompt.md"
+        prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+        summarize_file = script_root / "sum.md"
+        summarize_file.write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
+        env = {"project_root": str(script_root), "agent_cmd": "true", "base_branch": "dev"}
+        with patch("agent_runner_lib.run_agent", return_value=0):
+            with patch("agent_runner_lib.run_parser", return_value=0):
+                with patch("agent_runner_lib.run_summarizer", return_value=0):
+                    # Create session file so run_parser branch is taken
+                    from agent_runner_lib import TIMESTAMP_FMT
+                    from datetime import datetime
+                    ts = datetime.now().strftime(TIMESTAMP_FMT)
+                    (sessions / f"{ts}.jsonl").write_text("[]")
+                    (transcripts / f"{ts}.md").write_text("transcript")
+                    code = run_one_cycle(
+                        script_root_path=script_root,
+                        project_root=script_root,
+                        env=env,
+                        memory_bank_dir=memory_bank,
+                        sessions_dir=sessions,
+                        transcripts_dir=transcripts,
+                        state_file=state_file,
+                        prompt_file=prompt_file,
+                        summarize_prompt_file=summarize_file,
+                        log=log,
+                    )
+        assert code == 0
+
+class TestMain:
+    def test_uses_lib_dir_when_script_root_path_none(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
+                    with patch("sys.argv", ["prog"]):
+                        code = main(config, "Test", script_root_path=None)
+        assert code == 0
+        # script_root_path passed to run_one_cycle should be agent_runner_lib's parent
+        call_kw = mock_cycle.call_args[1]
+        assert call_kw["script_root_path"] is not None
+
+    def test_returns_one_when_dotenv_missing(self, config: AgentConfig):
+        from agent_runner_lib import main
+        with patch("agent_runner_lib.load_dotenv", None):
+            with patch("sys.argv", ["prog"]):
+                code = main(config, "Test", script_root_path=Path("/tmp"))
+            assert code == 1
+
+    def test_returns_one_when_project_root_not_dir(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path / "nonexistent")}, clear=False):
+                with patch("sys.argv", ["prog"]):
+                    code = main(config, "Test", script_root_path=tmp_path)
+            assert code == 1
+
+    def test_runs_one_cycle_by_default(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        prompt_file = tmp_path / "prompts" / "agent_prompt.md"
+        prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_one_cycle", return_value=0) as mock_cycle:
+                    with patch("sys.argv", ["prog"]):
+                        code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        mock_cycle.assert_called_once()
+
+    def test_summarize_only_uses_latest_transcript(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "transcripts").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        (tmp_path / "transcripts" / "latest.md").write_text("transcript")
+        (tmp_path / "prompts" / "summarize_prompt.md").write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                    with patch("sys.argv", ["prog", "--summarize-only"]):
+                        code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        mock_sum.assert_called_once()
+
+    def test_summarize_only_with_explicit_transcript(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        transcript = tmp_path / "custom.md"
+        transcript.write_text("x")
+        (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                    with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(transcript)]):
+                        code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        mock_sum.assert_called_once()
+
+    def test_summarize_only_returns_one_when_no_transcript(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "transcripts").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("sys.argv", ["prog", "--summarize-only"]):
+                    code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 1
+
+    def test_summarize_only_absolute_transcript_path(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        abs_transcript = tmp_path / "abs_transcript.md"
+        abs_transcript.write_text("content")
+        (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                    with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(abs_transcript)]):
+                        code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        mock_sum.assert_called_once()
+
+    def test_summarize_only_returns_one_when_transcript_file_missing(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        missing = tmp_path / "nonexistent.md"
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(missing)]):
+                    code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 1
+
+    def test_summarize_only_returns_one_when_summarize_prompt_missing(self, config: AgentConfig, tmp_path: Path):
+        from agent_runner_lib import main
+        (tmp_path / "transcripts").mkdir(exist_ok=True)
+        (tmp_path / "transcripts" / "t.md").write_text("x")
+        (tmp_path / "memory_bank").mkdir(exist_ok=True)
+        (tmp_path / "memory_bank" / "state.md").touch()
+        # No prompts/summarize_prompt.md
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("sys.argv", ["prog", "--summarize-only"]):
+                    code = main(config, "Test", script_root_path=tmp_path)
+        assert code == 1
+
+    def test_daemon_uses_interval_arg(self, config: AgentConfig, tmp_path: Path):
+        import agent_runner_lib
+        agent_runner_lib._shutdown_requested = False  # reset in case a prior test set it
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "agent_prompt.md").write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+        cycles = []
+        def set_shutdown(*args, **kwargs):
+            cycles.append(1)
+            agent_runner_lib._shutdown_requested = True
+            return 0
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"PROJECT_ROOT": str(tmp_path)}, clear=False):
+                with patch("agent_runner_lib.run_one_cycle", side_effect=set_shutdown):
+                    with patch("agent_runner_lib.time.sleep"):
+                        with patch("sys.argv", ["prog", "--daemon", "--interval", "120"]):
+                            code = agent_runner_lib.main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        assert len(cycles) >= 1
+

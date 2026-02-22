@@ -1,0 +1,26 @@
+# Agent registry: unique id -> config. Use run_agent.py --agent <id>.
+# Each agent has its own prompt, sessions/transcripts dirs, and memory bank.
+# Summarization uses the shared prompts/summarize_prompt.md.
+
+agents:
+  coder:
+    name: Coder
+    default_prompt_file: prompts/agent_prompt.md
+    prompt_file_env_key: PROMPT_FILE
+    default_sessions_dir: sessions
+    sessions_dir_env_key: SESSIONS_DIR
+    default_transcripts_dir: transcripts
+    transcripts_dir_env_key: TRANSCRIPTS_DIR
+    default_memory_bank_dir: memory_bank
+    memory_bank_dir_env_key: MEMORY_BANK_DIR
+
+  reviewer:
+    name: Reviewer
+    default_prompt_file: prompts/reviewer_prompt.md
+    prompt_file_env_key: REVIEWER_PROMPT_FILE
+    default_sessions_dir: sessions_reviewer
+    sessions_dir_env_key: REVIEWER_SESSIONS_DIR
+    default_transcripts_dir: transcripts_reviewer
+    transcripts_dir_env_key: REVIEWER_TRANSCRIPTS_DIR
+    default_memory_bank_dir: memory_bank_reviewer
+    memory_bank_dir_env_key: REVIEWER_MEMORY_BANK_DIR
