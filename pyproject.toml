@@ -1,0 +1,9 @@
+[project]
+name = "cursor-scripts"
+version = "0.1.0"
+description = "Run Cursor agent, parse session logs, and run summarizer to update memory bank."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.0.0",
+]
