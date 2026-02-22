@@ -9,7 +9,7 @@ Runs Cursor agents against a project: each agent has its own prompt, memory bank
    uv sync
    ```
 
-2. **Config:** copy `.env.sample` to `.env` and set:
+2. **Config:** copy `.env.example` to `.env` and set:
    - **`PROJECT_ROOT`** (required) — path to the repo where the agent runs (e.g. your app or codebase).
 
    Other vars are optional (agent command, dirs, base branch, log level, daemon interval). Per-agent dirs and prompt can be overridden in `.env` using the keys in `agents.yaml`.
@@ -40,7 +40,7 @@ Agents are defined in **`agents.yaml`**. Each entry has a unique **id** (used wi
 - **name** — display label
 - **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`)
 - **default_sessions_dir**, **default_transcripts_dir**, **default_memory_bank_dir** — dirs under this repo
-- **\*_env_key** — env var names to override those dirs and the prompt file (see `.env.sample`)
+- **\*_env_key** — env var names to override those dirs and the prompt file (see `.env.example`)
 
 Summarization uses the shared **`prompts/summarize_prompt.md`** for all agents.
 

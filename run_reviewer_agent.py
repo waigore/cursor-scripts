@@ -2,7 +2,7 @@
 """
 Run the Cursor reviewer agent in the project directory, capture session logs to sessions_reviewer/,
 post-process to transcripts_reviewer/, then run a summarizer agent to update memory_bank_reviewer/state.md.
-Config via .env (required: PROJECT_ROOT). See .env.sample.
+Config via .env (required: PROJECT_ROOT). See .env.example.
 Uses its own memory bank (memory_bank_reviewer/), sessions (sessions_reviewer/), and transcripts (transcripts_reviewer/).
 """
 

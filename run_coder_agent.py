@@ -2,7 +2,7 @@
 """
 Run the Cursor agent in the project directory, capture session logs to sessions/,
 post-process to transcripts/, then run a summarizer agent to update memory_bank/state.md.
-Config via .env (required: PROJECT_ROOT). See .env.sample.
+Config via .env (required: PROJECT_ROOT). See .env.example.
 Uses its own memory bank (memory_bank/), sessions (sessions/), and transcripts (transcripts/).
 """
 

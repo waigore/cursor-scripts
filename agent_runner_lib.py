@@ -95,7 +95,7 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         load_dotenv(env_path)
     project_root = os.environ.get("PROJECT_ROOT", "").strip()
     if not project_root:
-        logging.error("PROJECT_ROOT is required; set it in .env (see .env.sample)")
+        logging.error("PROJECT_ROOT is required; set it in .env (see .env.example)")
         sys.exit(1)
     raw_interval = os.environ.get("DAEMON_INTERVAL_SEC", str(DEFAULT_DAEMON_INTERVAL_SEC)).strip()
     try:
