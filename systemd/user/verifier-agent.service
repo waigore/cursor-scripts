@@ -1,0 +1,34 @@
+# Cursor verifier agent daemon (user service)
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/user/verifier-agent.service ~/.config/systemd/user/
+#   # If cursor-scripts is not in ~/cursor-scripts, edit WorkingDirectory below (or use a drop-in)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now verifier-agent.service
+#
+# Logs: ~/.local/log/cursor-agent/verifier-agent.log
+# Status: systemctl --user status verifier-agent.service
+# Journal: journalctl --user -u verifier-agent.service -f
+
+[Unit]
+Description=Cursor verifier agent daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Must be the directory containing run_agent.py and .env (script resolves paths from here)
+WorkingDirectory=%h/cursor-scripts
+# Create log directory if missing (- = ignore failure)
+ExecStartPre=-/bin/mkdir -p %h/.local/log/cursor-agent
+# Use project venv if present (after uv sync), else system python
+ExecStart=%h/cursor-scripts/.venv/bin/python run_agent.py --agent verifier --daemon
+Restart=on-failure
+RestartSec=10
+# Single log file for stdout and stderr (user-accessible under XDG state)
+StandardOutput=append:%h/.local/log/cursor-agent/verifier-agent.log
+StandardError=append:%h/.local/log/cursor-agent/verifier-agent.log
+
+[Install]
+WantedBy=default.target
