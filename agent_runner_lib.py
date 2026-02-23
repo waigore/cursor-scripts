@@ -56,6 +56,7 @@ class AgentConfig:
     project_root: str
     default_prompt_file: str
     dir_prefix: str = ""
+    daemon_interval_sec: int | None = None
 
 
 def script_root(caller_file: str) -> Path:
@@ -92,11 +93,22 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
     if not project_root:
         logging.error("project_root is required for this agent; set it in agents.yaml")
         sys.exit(1)
-    raw_interval = os.environ.get("DAEMON_INTERVAL_SEC", str(DEFAULT_DAEMON_INTERVAL_SEC)).strip()
-    try:
-        daemon_interval_sec = int(raw_interval)
-    except ValueError:
-        daemon_interval_sec = DEFAULT_DAEMON_INTERVAL_SEC
+    # Resolution: agents.yaml daemon_interval_sec (if set and valid) -> .env DAEMON_INTERVAL_SEC -> default
+    def _interval_from_env() -> int:
+        raw = os.environ.get("DAEMON_INTERVAL_SEC", str(DEFAULT_DAEMON_INTERVAL_SEC)).strip()
+        try:
+            return int(raw)
+        except ValueError:
+            return DEFAULT_DAEMON_INTERVAL_SEC
+
+    if config.daemon_interval_sec is not None:
+        try:
+            val = int(config.daemon_interval_sec)
+            daemon_interval_sec = val if val > 0 else _interval_from_env()
+        except (TypeError, ValueError):
+            daemon_interval_sec = _interval_from_env()
+    else:
+        daemon_interval_sec = _interval_from_env()
     base_sessions = os.environ.get("SESSIONS_DIR", "sessions").strip() or "sessions"
     base_transcripts = os.environ.get("TRANSCRIPTS_DIR", "transcripts").strip() or "transcripts"
     base_memory_bank = os.environ.get("MEMORY_BANK_DIR", "memory_bank").strip() or "memory_bank"
@@ -431,7 +443,7 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
                 signal.signal(sig, _on_shutdown_signal)
             except (ValueError, OSError):
                 pass
-        log.info("Daemon mode: interval=%s s (Ctrl+C or SIGTERM to stop)", interval_sec)
+        log.info("Daemon mode: using interval=%s s (Ctrl+C or SIGTERM to stop)", interval_sec)
         cycle = 0
         while not _shutdown_requested:
             cycle += 1

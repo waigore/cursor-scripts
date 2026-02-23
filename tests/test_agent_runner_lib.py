@@ -150,6 +150,41 @@ class TestLoadEnv:
                 env = load_env(script_root, config)
             assert env["daemon_interval_sec"] == 60
 
+    def test_daemon_interval_from_agents_yaml_used_when_set(self, script_root: Path):
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            daemon_interval_sec=120,
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            env = load_env(script_root, config)
+        assert env["daemon_interval_sec"] == 120
+
+    def test_daemon_interval_agents_yaml_overrides_env(self, script_root: Path):
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            daemon_interval_sec=120,
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"DAEMON_INTERVAL_SEC": "90"}, clear=False):
+                env = load_env(script_root, config)
+        assert env["daemon_interval_sec"] == 120
+
+    def test_daemon_interval_invalid_agent_falls_back_to_env(self, script_root: Path):
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            daemon_interval_sec=0,  # invalid: not positive
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {"DAEMON_INTERVAL_SEC": "90"}, clear=False):
+                env = load_env(script_root, config)
+        assert env["daemon_interval_sec"] == 90
+
 
 class TestEnsureDirsAndState:
     def test_creates_dirs_and_state_file(self, script_root: Path, log):

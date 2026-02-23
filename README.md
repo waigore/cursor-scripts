@@ -25,7 +25,7 @@ uv run run_agent.py --list-agents
 uv run run_agent.py --agent coder
 uv run run_agent.py -a reviewer
 
-# Daemon: loop every N seconds (default: DAEMON_INTERVAL_SEC from .env)
+# Daemon: loop every N seconds (resolution: --interval > agents.yaml daemon_interval_sec > .env DAEMON_INTERVAL_SEC > 60)
 uv run run_agent.py -a coder --daemon [--interval 60]
 
 # Only run summarizer on an existing transcript
@@ -39,7 +39,8 @@ Agents are defined in **`agents.yaml`** (create it by copying **`agents.yaml.exa
 - **name** — display label
 - **project_root** — (required) path to the repo where this agent runs
 - **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`)
-- **dir_prefix** — used for this agent’s file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
+- **dir_prefix** — used for this agent's file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
+- **daemon_interval_sec** — (optional) seconds between daemon cycles for this agent; overrides `.env` `DAEMON_INTERVAL_SEC`. Resolution order: CLI `--interval` → agents.yaml → .env → default 60.’s file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
 
 Summarization uses the shared **`prompts/summarize_prompt.md`** for all agents.
 

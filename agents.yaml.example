@@ -3,6 +3,7 @@
 #
 # Agent registry: unique id -> config. Use run_agent.py --agent <id>.
 # Per-agent: project_root (required), prompt file, dir_prefix to distinguish this agent's files in shared sessions/transcripts/memory_bank.
+# Optional: daemon_interval_sec overrides .env DAEMON_INTERVAL_SEC for this agent (resolution: CLI --interval > agents.yaml > .env).
 # Summarization uses the shared prompts/summarize_prompt.md.
 
 agents:
@@ -11,6 +12,7 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/agent_prompt.md
     dir_prefix: ""
+    # daemon_interval_sec: 3600  # optional; overrides .env DAEMON_INTERVAL_SEC
 
   reviewer:
     name: Reviewer

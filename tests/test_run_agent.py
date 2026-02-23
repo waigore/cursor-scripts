@@ -53,6 +53,21 @@ agents:
         assert config.default_prompt_file == "prompts/coder.md"
         assert config.project_root == "/my/project"
 
+    def test_registry_loads_daemon_interval_sec_from_yaml(self, tmp_path: Path):
+        yaml_path = tmp_path / "agents.yaml"
+        yaml_path.write_text("""
+agents:
+  coder:
+    name: Coder
+    project_root: /my/project
+    default_prompt_file: prompts/coder.md
+    dir_prefix: ""
+    daemon_interval_sec: 120
+""")
+        registry = load_registry(yaml_path)
+        config, _ = registry["coder"]
+        assert config.daemon_interval_sec == 120
+
     def test_name_optional_uses_agent_id(self, tmp_path: Path):
         yaml_path = tmp_path / "agents.yaml"
         yaml_path.write_text("""
