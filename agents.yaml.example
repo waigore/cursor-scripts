@@ -4,7 +4,7 @@
 # Agent registry: unique id -> config. Use run_agent.py --agent <id>.
 # Per-agent: project_root (required), prompt file, dir_prefix to distinguish this agent's files in shared sessions/transcripts/memory_bank.
 # Optional: daemon_interval_sec overrides .env DAEMON_INTERVAL_SEC for this agent (resolution: CLI --interval > agents.yaml > .env).
-# Summarization uses the shared prompts/summarize_prompt.md.
+# By default agents update their own memory state; set use_summarizer: true to use the shared prompts/summarize_prompt.md.
 
 agents:
   coder:
@@ -12,10 +12,21 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/agent_prompt.md
     dir_prefix: ""
-    # daemon_interval_sec: 3600  # optional; overrides .env DAEMON_INTERVAL_SEC
+    daemon_interval_sec: 600  # 10 minutes; overrides .env DAEMON_INTERVAL_SEC
+    use_summarizer: false
 
   reviewer:
     name: Reviewer
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/reviewer_prompt.md
     dir_prefix: "reviewer"
+    daemon_interval_sec: 1800  # 30 minutes; overrides .env DAEMON_INTERVAL_SEC
+    use_summarizer: false
+
+  verifier:
+    name: Verifier
+    project_root: ""  # required: set to the project path where this agent runs
+    default_prompt_file: prompts/verifier_prompt.md
+    dir_prefix: "verifier"
+    daemon_interval_sec: 300  # 5 minutes; handles and verifies open issues raised by the reviewer
+    use_summarizer: false

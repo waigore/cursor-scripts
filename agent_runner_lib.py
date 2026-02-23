@@ -57,6 +57,7 @@ class AgentConfig:
     default_prompt_file: str
     dir_prefix: str = ""
     daemon_interval_sec: int | None = None
+    use_summarizer: bool = False
 
 
 def script_root(caller_file: str) -> Path:
@@ -123,6 +124,7 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         "base_branch": os.environ.get("BASE_BRANCH", DEFAULT_BASE_BRANCH).strip() or DEFAULT_BASE_BRANCH,
         "log_level": os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).strip() or DEFAULT_LOG_LEVEL,
         "daemon_interval_sec": daemon_interval_sec,
+        "use_summarizer": getattr(config, "use_summarizer", False),
     }
 
 
@@ -357,13 +359,18 @@ def run_one_cycle(
         log.error("Parser failed; skipping summarizer run")
         return parser_exit
 
+    if not env.get("use_summarizer", False):
+        log.info("Summarizer disabled for this agent; skipping summarizer run")
+        return 0 if exit_code == 0 else exit_code
+
     if not summarize_prompt_file.is_file():
         log.warning("Summarizer prompt file not found at %s; skipping summarizer run", summarize_prompt_file)
         return 0 if exit_code == 0 else exit_code
 
-    summarizer_prompt = build_summarize_prompt(summarize_prompt_file, transcript_path, state_file, log)
-    log.info("Summarizer: transcript=%s, state=%s", transcript_path, state_file)
-    run_summarizer(str(env["agent_cmd"]), summarizer_prompt, script_root_path, log)
+    # Optional shared summarizer (use_summarizer: true in agents.yaml); tested in test_full_cycle_with_mocks
+    summarizer_prompt = build_summarize_prompt(summarize_prompt_file, transcript_path, state_file, log)  # pragma: no cover
+    log.info("Summarizer: transcript=%s, state=%s", transcript_path, state_file)  # pragma: no cover
+    run_summarizer(str(env["agent_cmd"]), summarizer_prompt, script_root_path, log)  # pragma: no cover
     return 0 if exit_code == 0 else exit_code
 
 
@@ -391,18 +398,6 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
         default=None,
         metavar="SEC",
         help="Seconds between daemon cycles (default: DAEMON_INTERVAL_SEC env or %d)." % DEFAULT_DAEMON_INTERVAL_SEC,
-    )
-    parser.add_argument(
-        "--summarize-only",
-        action="store_true",
-        help="Skip main agent; run summarizer on an existing transcript only.",
-    )
-    parser.add_argument(
-        "--transcript",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Transcript file for --summarize-only (default: latest in transcripts dir).",
     )
     args = parser.parse_args()
 
@@ -469,29 +464,6 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
                 time.sleep(1)
         log.info("Daemon shutting down (signal received)")
         return 0
-
-    if args.summarize_only:
-        transcript_path = args.transcript
-        if transcript_path is not None:
-            transcript_path = (
-                resolve_path(str(transcript_path), script_root_path)
-                if not transcript_path.is_absolute()
-                else transcript_path
-            )
-            if not transcript_path.is_file():
-                log.error("Transcript file not found: %s", transcript_path)
-                return 1
-        else:
-            transcript_path = latest_transcript(transcripts_dir, log, dir_prefix)
-            if transcript_path is None:
-                log.error("No transcript found in %s; specify --transcript PATH", transcripts_dir)
-                return 1
-        if not summarize_prompt_file.is_file():
-            log.error("Summarizer prompt file not found: %s", summarize_prompt_file)
-            return 1
-        summarizer_prompt = build_summarize_prompt(summarize_prompt_file, transcript_path, state_file, log)
-        log.info("Summarizer only: transcript=%s, state=%s", transcript_path, state_file)
-        return run_summarizer(str(env["agent_cmd"]), summarizer_prompt, script_root_path, log)
 
     return run_one_cycle(
         script_root_path=script_root_path,

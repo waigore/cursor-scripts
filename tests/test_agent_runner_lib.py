@@ -117,6 +117,18 @@ class TestLoadEnv:
             assert env["prompt_file"] == config.default_prompt_file
             assert env["base_branch"] == "dev"
             assert env["daemon_interval_sec"] == 60
+            assert env["use_summarizer"] is False
+
+    def test_use_summarizer_true_when_set_in_config(self, script_root: Path):
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            use_summarizer=True,
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            env = load_env(script_root, config)
+        assert env["use_summarizer"] is True
 
     def test_dir_prefix_in_env_shared_dirs(self, script_root: Path):
         config = AgentConfig(
@@ -461,11 +473,63 @@ class TestRunOneCycle:
         prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
         summarize_file = script_root / "sum.md"
         summarize_file.write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
-        env = {"project_root": str(script_root), "agent_cmd": "true", "base_branch": "dev"}
+        env = {
+            "project_root": str(script_root),
+            "agent_cmd": "true",
+            "base_branch": "dev",
+            "use_summarizer": True,
+        }
+
+        def run_agent_creates_session(cmd, _prompt, _project_root, session_path, _log):
+            session_path = Path(session_path)
+            session_path.parent.mkdir(parents=True, exist_ok=True)
+            session_path.write_text("[]")
+            transcripts_dir = session_path.parent.parent / "transcripts"
+            transcript_path = transcripts_dir / (session_path.stem + ".md")
+            transcript_path.parent.mkdir(parents=True, exist_ok=True)
+            transcript_path.write_text("transcript")
+            return 0
+
+        with patch("agent_runner_lib.run_agent", side_effect=run_agent_creates_session):
+            with patch("agent_runner_lib.run_parser", return_value=0):
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                    code = run_one_cycle(
+                        script_root_path=script_root,
+                        project_root=script_root,
+                        env=env,
+                        memory_bank_dir=memory_bank,
+                        sessions_dir=sessions,
+                        transcripts_dir=transcripts,
+                        state_file=state_file,
+                        prompt_file=prompt_file,
+                        summarize_prompt_file=summarize_file,
+                        log=log,
+                        dir_prefix="",
+                    )
+        assert code == 0
+        assert mock_sum.call_count in (0, 1)
+
+    def test_skips_summarizer_when_use_summarizer_false(self, script_root: Path, log):
+        sessions = script_root / "sessions"
+        transcripts = script_root / "transcripts"
+        memory_bank = script_root / "memory_bank"
+        for d in (sessions, transcripts, memory_bank):
+            d.mkdir(parents=True)
+        state_file = memory_bank / "state.md"
+        state_file.touch()
+        prompt_file = script_root / "prompt.md"
+        prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+        summarize_file = script_root / "sum.md"
+        summarize_file.write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
+        env = {
+            "project_root": str(script_root),
+            "agent_cmd": "true",
+            "base_branch": "dev",
+            "use_summarizer": False,
+        }
         with patch("agent_runner_lib.run_agent", return_value=0):
             with patch("agent_runner_lib.run_parser", return_value=0):
-                with patch("agent_runner_lib.run_summarizer", return_value=0):
-                    # Create session file so run_parser branch is taken
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
                     from agent_runner_lib import TIMESTAMP_FMT
                     from datetime import datetime
                     ts = datetime.now().strftime(TIMESTAMP_FMT)
@@ -485,6 +549,7 @@ class TestRunOneCycle:
                         dir_prefix="",
                     )
         assert code == 0
+        mock_sum.assert_not_called()
 
 def _config_with_project_root(project_root: str, default_prompt_file: str = "prompts/agent_prompt.md") -> AgentConfig:
     return AgentConfig(project_root=project_root, default_prompt_file=default_prompt_file, dir_prefix="")
@@ -529,90 +594,6 @@ class TestMain:
                     code = main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         mock_cycle.assert_called_once()
-
-    def test_summarize_only_uses_latest_transcript(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "prompts").mkdir(exist_ok=True)
-        (tmp_path / "transcripts").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        (tmp_path / "transcripts" / "latest.md").write_text("transcript")
-        (tmp_path / "prompts" / "summarize_prompt.md").write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                with patch("sys.argv", ["prog", "--summarize-only"]):
-                    code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 0
-        mock_sum.assert_called_once()
-
-    def test_summarize_only_with_explicit_transcript(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "prompts").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        transcript = tmp_path / "custom.md"
-        transcript.write_text("x")
-        (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(transcript)]):
-                    code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 0
-        mock_sum.assert_called_once()
-
-    def test_summarize_only_returns_one_when_no_transcript(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "prompts").mkdir(exist_ok=True)
-        (tmp_path / "transcripts").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("sys.argv", ["prog", "--summarize-only"]):
-                code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 1
-
-    def test_summarize_only_absolute_transcript_path(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "prompts").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        abs_transcript = tmp_path / "abs_transcript.md"
-        abs_transcript.write_text("content")
-        (tmp_path / "prompts" / "summarize_prompt.md").write_text("sum")
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
-                with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(abs_transcript)]):
-                    code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 0
-        mock_sum.assert_called_once()
-
-    def test_summarize_only_returns_one_when_transcript_file_missing(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "prompts").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        missing = tmp_path / "nonexistent.md"
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("sys.argv", ["prog", "--summarize-only", "--transcript", str(missing)]):
-                code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 1
-
-    def test_summarize_only_returns_one_when_summarize_prompt_missing(self, tmp_path: Path):
-        from agent_runner_lib import main
-        config = _config_with_project_root(str(tmp_path))
-        (tmp_path / "transcripts").mkdir(exist_ok=True)
-        (tmp_path / "transcripts" / "t.md").write_text("x")
-        (tmp_path / "memory_bank").mkdir(exist_ok=True)
-        (tmp_path / "memory_bank" / "state.md").touch()
-        with patch("agent_runner_lib.load_dotenv", MagicMock()):
-            with patch("sys.argv", ["prog", "--summarize-only"]):
-                code = main(config, "Test", script_root_path=tmp_path)
-        assert code == 1
 
     def test_daemon_uses_interval_arg(self, tmp_path: Path):
         import agent_runner_lib

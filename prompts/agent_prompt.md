@@ -27,8 +27,8 @@ You are the Cursor agent working on this repo. You must create a PR into **{{BAS
 
 ## End-of-session summary
 
-At the end of your run, provide a short summary so the runner can update the memory bank:
+At the end of your run, update the memory bank state file at **{{STATE_FILE_PATH}}** directly: read its current content, then write a concise update. Keep at least:
 - **Done:** ...
 - **PR:** <link> (branch: ...)
-- **Issues assigned to me:** List of issue links you are currently assigned to (so the runner can update state).
+- **Issues assigned to me:** List of issue links you are currently assigned to.
 - **Outstanding:** ...
