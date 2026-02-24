@@ -35,13 +35,15 @@ Agents are defined in **`agents.yaml`** (create it by copying **`agents.yaml.exa
 
 - **name** — display label
 - **project_root** — (required) path to the repo where this agent runs
-- **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`)
+- **default_prompt_file** — main prompt (templated with `{{STATE_FILE_PATH}}`, `{{STATE_CONTENT}}`, `{{BASE_BRANCH}}`, and optionally `{{FILE_LIST}}` for agents that use an extra file list)
 - **dir_prefix** — used for this agent's file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
 - **daemon_interval_sec** — (optional) seconds between daemon cycles for this agent; overrides `.env` `DAEMON_INTERVAL_SEC`. Resolution order: CLI `--interval` → agents.yaml → .env → default 60.’s file names inside the shared `sessions/`, `transcripts/`, and `memory_bank/` dirs (e.g. `"reviewer"` → `state_reviewer.md`, `{timestamp}_reviewer.jsonl`)
 
 By default agents update their own memory state. Set **use_summarizer: true** for an agent to use the shared **`prompts/summarize_prompt.md`**.
 
 **Adding an agent:** add a prompt under `prompts/`, then add a new block under `agents:` in `agents.yaml` with the same field shape as `coder` or `reviewer`.
+
+For more generic roles, you can use `prompts/generic_agent_prompt.md` and a `generic` agent entry in `agents.yaml` that includes an optional `file_list` field. The `file_list` is a multi-line string of paths relative to `project_root`; it is substituted into the `{{FILE_LIST}}` placeholder in the generic prompt so the agent knows which files to read for additional context.
 
 ## Testing
 

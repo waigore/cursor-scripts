@@ -30,3 +30,18 @@ agents:
     dir_prefix: "verifier"
     daemon_interval_sec: 300  # 5 minutes; handles and verifies open issues raised by the reviewer
     use_summarizer: false
+
+  generic:
+    name: Generic
+    project_root: ""  # required: set to the project path where this agent runs
+    default_prompt_file: prompts/generic_agent_prompt.md
+    dir_prefix: "generic"
+    daemon_interval_sec: 900  # 15 minutes; example interval for a generic agent
+    use_summarizer: false
+    # Optional: list of files (relative to project_root) that the generic agent
+    # should read for additional context. This string is substituted into
+    # {{FILE_LIST}} in prompts/generic_agent_prompt.md.
+    file_list: |
+      SPEC/requirements.md
+      README.md
+      src/config/feature_flags.yaml

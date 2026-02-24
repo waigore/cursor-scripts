@@ -23,6 +23,7 @@ def config() -> AgentConfig:
         project_root="/my/project",
         default_prompt_file="prompts/agent_prompt.md",
         dir_prefix="",
+        file_list=None,
     )
 
 

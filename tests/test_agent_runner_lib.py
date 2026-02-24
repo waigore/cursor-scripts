@@ -118,6 +118,7 @@ class TestLoadEnv:
             assert env["base_branch"] == "dev"
             assert env["daemon_interval_sec"] == 60
             assert env["use_summarizer"] is False
+            assert env["file_list"] == ""
 
     def test_use_summarizer_true_when_set_in_config(self, script_root: Path):
         config = AgentConfig(
@@ -254,18 +255,19 @@ class TestBuildMainPrompt:
     def test_substitutes_placeholders(self, script_root: Path, log):
         template = script_root / "t.md"
         template.write_text(
-            "State path: {{STATE_FILE_PATH}}\nContent: {{STATE_CONTENT}}\nBranch: {{BASE_BRANCH}}"
+            "State path: {{STATE_FILE_PATH}}\nContent: {{STATE_CONTENT}}\nBranch: {{BASE_BRANCH}}\nFiles:\n{{FILE_LIST}}"
         )
         state_file = script_root / "state.md"
-        out = build_main_prompt(template, state_file, "my content", "main", log)
+        out = build_main_prompt(template, state_file, "my content", "main", "a.txt\nb.txt", log)
         assert "State path: " in out and str(state_file) in out
         assert "Content: my content" in out
         assert "Branch: main" in out
+        assert "a.txt" in out and "b.txt" in out
 
     def test_empty_state_content_replaced_with_empty_marker(self, script_root: Path, log):
         template = script_root / "t.md"
         template.write_text("{{STATE_CONTENT}}")
-        out = build_main_prompt(template, script_root / "s.md", "", "dev", log)
+        out = build_main_prompt(template, script_root / "s.md", "", "dev", "", log)
         assert "(empty)" in out
 
 

@@ -76,6 +76,9 @@ agents:
     project_root: /p
     default_prompt_file: p.md
     dir_prefix: ""
+    file_list: |
+      foo.md
+      bar/baz.md
 """)
         registry = load_registry(yaml_path)
         _, name = registry["no_name_agent"]

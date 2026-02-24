@@ -58,6 +58,7 @@ class AgentConfig:
     dir_prefix: str = ""
     daemon_interval_sec: int | None = None
     use_summarizer: bool = False
+    file_list: str | None = None
 
 
 def script_root(caller_file: str) -> Path:
@@ -125,6 +126,7 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         "log_level": os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).strip() or DEFAULT_LOG_LEVEL,
         "daemon_interval_sec": daemon_interval_sec,
         "use_summarizer": getattr(config, "use_summarizer", False),
+        "file_list": (config.file_list or "").strip(),
     }
 
 
@@ -162,6 +164,7 @@ def build_main_prompt(
     state_file_path: Path,
     state_content: str,
     base_branch: str,
+    file_list: str,
     log: logging.Logger,
 ) -> str:
     log.info("Building main prompt")
@@ -171,6 +174,7 @@ def build_main_prompt(
         template.replace("{{STATE_FILE_PATH}}", str(state_file_path))
         .replace("{{STATE_CONTENT}}", state_content or "(empty)")
         .replace("{{BASE_BRANCH}}", base_branch)
+        .replace("{{FILE_LIST}}", file_list or "")
     )
 
 
@@ -336,7 +340,14 @@ def run_one_cycle(
     if not prompt_file.is_file():
         log.error("Prompt file not found: %s", prompt_file)
         return 1
-    main_prompt = build_main_prompt(prompt_file, state_file, state_content, str(env["base_branch"]), log)
+    main_prompt = build_main_prompt(
+        prompt_file,
+        state_file,
+        state_content,
+        str(env["base_branch"]),
+        str(env.get("file_list", "")),
+        log,
+    )
     timestamp = datetime.now().strftime(TIMESTAMP_FMT)
     session_suffix = f"{timestamp}_{dir_prefix}.jsonl" if dir_prefix else f"{timestamp}.jsonl"
     transcript_suffix = f"{timestamp}_{dir_prefix}.md" if dir_prefix else f"{timestamp}.md"
