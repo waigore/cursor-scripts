@@ -2,12 +2,7 @@
 
 **Base branch:** {{BASE_BRANCH}}. Use this as your reference (check it out and pull) so you see the latest code. Do **not** modify project files; your job is to review specs and open issues only.
 
-Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, refs to specs, and **Issues raised** (issue links you opened previously). Use it with open GitHub issues to choose a spec that has not been reviewed recently.
-
-Current state content:
-```
-{{STATE_CONTENT}}
-```
+Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, refs to specs, and **Issues raised** (issue links you opened previously). Use it with open GitHub issues to choose a spec that has not been reviewed recently. Read the state from that path when needed (it is not pasted into this prompt).
 
 **Project owner:** The project owner is the repo owner (e.g. the GitHub user or org that owns the repository). You can obtain this via the GitHub CLI (`gh repo view --json owner`) or the GitHub API when opening issues that need to be assigned to the owner.
 

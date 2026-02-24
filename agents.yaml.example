@@ -15,6 +15,17 @@ agents:
     daemon_interval_sec: 600  # 10 minutes; overrides .env DAEMON_INTERVAL_SEC
     use_summarizer: false
 
+  # GDD coder: generic agent for GDD-driven development (see systemd/user/gdd-coder-agent.service)
+  gdd-coder:
+    name: GDD Coder
+    project_root: ""  # required: set to the project path where this agent runs
+    default_prompt_file: prompts/generic_agent_prompt.md
+    dir_prefix: "gddcoder"
+    daemon_interval_sec: 600  # 10 minutes
+    use_summarizer: false
+    file_list: |
+      SPEC/project/agentic-gdd-scenario-coverage.md
+
   reviewer:
     name: Reviewer
     project_root: ""  # required: set to the project path where this agent runs

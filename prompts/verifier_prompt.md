@@ -2,12 +2,7 @@
 
 **Base branch:** {{BASE_BRANCH}}. Use this as your reference (check it out and pull) so you see the latest code. Do **not** modify project files; your job is to verify and manage existing issues only.
 
-Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, refs to specs, and especially **Issues raised** (issue links the reviewer agent opened). Use it with open GitHub issues to find issues you (the agents) are responsible for verifying.
-
-Current state content:
-```
-{{STATE_CONTENT}}
-```
+Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, refs to specs, and especially **Issues raised** (issue links the reviewer agent opened). Use it with open GitHub issues to find issues you (the agents) are responsible for verifying. Read the state from that path when needed (it is not pasted into this prompt).
 
 **Project owner:** The project owner is the repo owner (e.g. the GitHub user or org that owns the repository). You can obtain this via the GitHub CLI (`gh repo view --json owner`) or the GitHub API when updating assignees.
 

@@ -336,10 +336,11 @@ def run_one_cycle(
     dir_prefix: str = "",
 ) -> int:
     """Run one full cycle: agent, parse session log, then summarizer. Returns exit code."""
-    state_content = read_state(state_file, log)
     if not prompt_file.is_file():
         log.error("Prompt file not found: %s", prompt_file)
         return 1
+    template_text = prompt_file.read_text(encoding="utf-8")
+    state_content = read_state(state_file, log) if "{{STATE_CONTENT}}" in template_text else ""
     main_prompt = build_main_prompt(
         prompt_file,
         state_file,

@@ -2,12 +2,7 @@
 
 **Base branch:** {{BASE_BRANCH}}. Use this as your reference (branch off it, rebase on it, and compare changes against it).
 
-Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, and refs to specs (typically under `SPEC/`).
-
-Current state content:
-```
-{{STATE_CONTENT}}
-```
+Memory bank state is at **{{STATE_FILE_PATH}}** (outside the project; use the absolute path). It tracks outstanding tasks, open PRs, and refs to specs (typically under `SPEC/`). Read the state from that path when needed (it is not pasted into this prompt).
 
 ## Role
 
