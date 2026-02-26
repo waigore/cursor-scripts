@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Single CLI entrypoint for Cursor agents. Select agent by name via --agent.
-Registry: agents.yaml (project_root, prompt, dir_prefix per agent). Global config in .env.
+Registry: agents.yaml (project_root, prompt, dir_prefix, optional command per agent).
+Global config in .env; optional shared command registry in commands.yaml.
 Summarizer uses shared prompts/summarize_prompt.md.
 """
 

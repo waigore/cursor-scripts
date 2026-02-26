@@ -1,0 +1,22 @@
+# Optional shared command registry for agents.
+# Copy to commands.yaml and customize as needed. Each entry under "commands"
+# defines the full agent CLI to invoke. Agents in agents.yaml can reference
+# these by id via a "command" field.
+#
+# The special token "__PROMPT__" (as a separate argument) marks where the
+# generated prompt argument should be placed in the command. If omitted, the
+# prompt is appended as the final argument.
+#
+# Examples:
+#   - Use the default Cursor agent with prompt as last argument:
+#       default: agent -p --force --model auto --approve-mcps --output-format stream-json
+#   - Use a custom CLI where the prompt should be passed to --prompt-file:
+#       file_prompt: my-agent --project-root . --prompt-file __PROMPT__ --format stream-json
+#
+# You can also use the expanded form with a mapping containing "cmd":
+#   custom:
+#     cmd: my-agent --foo bar __PROMPT__
+
+commands:
+  default: agent -p --force --model auto --approve-mcps --output-format stream-json
+

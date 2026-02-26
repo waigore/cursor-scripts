@@ -10,6 +10,7 @@ transcripts/
 
 # Local agent registry (copy from agents.yaml.example)
 agents.yaml
+commands.yaml
 
 # Python
 .venv/

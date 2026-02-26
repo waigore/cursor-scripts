@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
 except ImportError:
@@ -59,6 +61,13 @@ class AgentConfig:
     daemon_interval_sec: int | None = None
     use_summarizer: bool = False
     file_list: str | None = None
+    # Optional command id for this agent, resolved via commands.yaml.
+    # When set, overrides AGENT_CMD/.env and DEFAULT_AGENT_CMD.
+    command: str | None = None
+    # Optional: whether this agent's command produces JSON logs that require
+    # parsing via parse_coder_logs.py into a markdown transcript. When false,
+    # the parser and summarizer are skipped. Defaults to True for backward compatibility.
+    parse_json_logs: bool = True
 
 
 def script_root(caller_file: str) -> Path:
@@ -111,12 +120,55 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
             daemon_interval_sec = _interval_from_env()
     else:
         daemon_interval_sec = _interval_from_env()
+
+    # Agent command resolution:
+    # 1) Per-agent command id via commands.yaml when config.command is set
+    # 2) AGENT_CMD from environment
+    # 3) DEFAULT_AGENT_CMD fallback
+    command_id = (getattr(config, "command", None) or "").strip()
+    agent_cmd_env = os.environ.get("AGENT_CMD", "").strip()
+    commands_yaml_path = script_root_path / "commands.yaml"
+    if command_id:
+        commands: dict[str, str] = {}
+        if commands_yaml_path.is_file():
+            try:
+                raw = yaml.safe_load(commands_yaml_path.read_text(encoding="utf-8")) or {}
+                mapping = raw.get("commands", {})
+                if not isinstance(mapping, dict):
+                    logging.error("commands.yaml must contain a 'commands' mapping")
+                else:
+                    for key, val in mapping.items():
+                        if isinstance(val, str):
+                            cmd_str = val.strip()
+                        elif isinstance(val, dict) and "cmd" in val:
+                            cmd_str = str(val.get("cmd", "")).strip()
+                        else:
+                            logging.error("commands.%s: expected string or mapping with 'cmd' key", key)
+                            continue
+                        if cmd_str:
+                            commands[key] = cmd_str
+            except Exception as e:  # pragma: no cover - defensive
+                logging.error("Failed to load commands.yaml: %s", e)
+        else:
+            logging.error("commands.yaml not found at %s (required for command '%s')", commands_yaml_path, command_id)
+        cmd = commands.get(command_id)
+        if not cmd:
+            logging.error("Command '%s' not defined in commands.yaml", command_id)
+            sys.exit(1)
+        agent_cmd_val = cmd
+    elif agent_cmd_env:
+        agent_cmd_val = agent_cmd_env
+    else:
+        agent_cmd_val = DEFAULT_AGENT_CMD
+
+    agent_cmd_val = agent_cmd_val.strip() or DEFAULT_AGENT_CMD
+
     base_sessions = os.environ.get("SESSIONS_DIR", "sessions").strip() or "sessions"
     base_transcripts = os.environ.get("TRANSCRIPTS_DIR", "transcripts").strip() or "transcripts"
     base_memory_bank = os.environ.get("MEMORY_BANK_DIR", "memory_bank").strip() or "memory_bank"
     return {
         "project_root": project_root,
-        "agent_cmd": os.environ.get("AGENT_CMD", DEFAULT_AGENT_CMD).strip() or DEFAULT_AGENT_CMD,
+        "agent_cmd": agent_cmd_val,
         "memory_bank_dir": base_memory_bank,
         "sessions_dir": base_sessions,
         "transcripts_dir": base_transcripts,
@@ -127,7 +179,26 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         "daemon_interval_sec": daemon_interval_sec,
         "use_summarizer": getattr(config, "use_summarizer", False),
         "file_list": (config.file_list or "").strip(),
+        "parse_json_logs": getattr(config, "parse_json_logs", True),
     }
+
+
+def _build_command_args(agent_cmd: str, prompt_arg: str) -> list[str]:
+    """Split agent_cmd and insert prompt_arg.
+
+    If the token '__PROMPT__' appears as a separate argument, it is replaced
+    with prompt_arg (all occurrences). Otherwise, prompt_arg is appended as
+    the final argument.
+    """
+    parts = shlex.split(agent_cmd)
+    replaced = False
+    for idx, token in enumerate(parts):
+        if token == "__PROMPT__":
+            parts[idx] = prompt_arg
+            replaced = True
+    if not replaced:
+        parts.append(prompt_arg)
+    return parts
 
 
 def ensure_dirs_and_state(
@@ -212,8 +283,7 @@ def run_agent(
     else:
         prompt_arg = prompt
     try:
-        parts = shlex.split(agent_cmd)
-        cmd = parts + [prompt_arg]
+        cmd = _build_command_args(agent_cmd, prompt_arg)
         log.info("Starting main agent run: cwd=%s, session_out=%s", cwd, session_out_path)
         kwargs: dict = {"cwd": str(cwd), "env": {**os.environ}, "text": True}
         if session_out_path is not None:
@@ -263,8 +333,7 @@ def run_summarizer(
     else:
         prompt_arg = prompt
     try:
-        parts = shlex.split(agent_cmd)
-        cmd = parts + [prompt_arg]
+        cmd = _build_command_args(agent_cmd, prompt_arg)
         log.info("Starting summarizer agent: cwd=%s", cwd)
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), env=os.environ, stderr=subprocess.PIPE, text=True
@@ -335,7 +404,7 @@ def run_one_cycle(
     log: logging.Logger,
     dir_prefix: str = "",
 ) -> int:
-    """Run one full cycle: agent, parse session log, then summarizer. Returns exit code."""
+    """Run one full cycle: agent, optional parse → optional summarizer. Returns exit code."""
     if not prompt_file.is_file():
         log.error("Prompt file not found: %s", prompt_file)
         return 1
@@ -360,6 +429,12 @@ def run_one_cycle(
         return exit_code
     if exit_code != 0:
         log.warning("Main agent run failed; continuing to parse and summarizer anyway")
+
+    # Some agent commands may not emit JSON logs or may not need parsing.
+    # When parse_json_logs is false, skip parser and summarizer entirely.
+    if not env.get("parse_json_logs", True):
+        log.info("JSON log parsing disabled for this agent; skipping parser and summarizer")
+        return exit_code
 
     if not session_path.is_file():
         log.error("Session log was not created at %s; cannot run parser", session_path)

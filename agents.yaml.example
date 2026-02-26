@@ -4,6 +4,8 @@
 # Agent registry: unique id -> config. Use run_agent.py --agent <id>.
 # Per-agent: project_root (required), prompt file, dir_prefix to distinguish this agent's files in shared sessions/transcripts/memory_bank.
 # Optional: daemon_interval_sec overrides .env DAEMON_INTERVAL_SEC for this agent (resolution: CLI --interval > agents.yaml > .env).
+# Optional: command selects an entry from commands.yaml; when set, it overrides AGENT_CMD/.env and the built-in default.
+# Optional: parse_json_logs controls whether this agent's command produces JSON logs that should be parsed by parse_coder_logs.py into markdown transcripts. Defaults to true; set to false to skip parsing and summarization.
 # By default agents update their own memory state; set use_summarizer: true to use the shared prompts/summarize_prompt.md.
 
 agents:
@@ -12,6 +14,10 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/agent_prompt.md
     dir_prefix: ""
+    # Optional: command id defined in commands.yaml under commands: <id>: ...
+    # If omitted, the AGENT_CMD env var or the default agent command is used.
+    # command: default
+    # parse_json_logs: true  # set to false to skip parse_coder_logs.py and summarizer
     daemon_interval_sec: 600  # 10 minutes; overrides .env DAEMON_INTERVAL_SEC
     use_summarizer: false
 
@@ -21,6 +27,8 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/generic_agent_prompt.md
     dir_prefix: "gddcoder"
+    # command: default
+    # parse_json_logs: true
     daemon_interval_sec: 600  # 10 minutes
     use_summarizer: false
     file_list: |
@@ -31,6 +39,8 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/reviewer_prompt.md
     dir_prefix: "reviewer"
+    # command: default
+    # parse_json_logs: true
     daemon_interval_sec: 1800  # 30 minutes; overrides .env DAEMON_INTERVAL_SEC
     use_summarizer: false
 
@@ -39,6 +49,8 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/verifier_prompt.md
     dir_prefix: "verifier"
+    # command: default
+    # parse_json_logs: true
     daemon_interval_sec: 300  # 5 minutes; handles and verifies open issues raised by the reviewer
     use_summarizer: false
 
@@ -47,6 +59,8 @@ agents:
     project_root: ""  # required: set to the project path where this agent runs
     default_prompt_file: prompts/generic_agent_prompt.md
     dir_prefix: "generic"
+    # command: default
+    # parse_json_logs: true
     daemon_interval_sec: 900  # 15 minutes; example interval for a generic agent
     use_summarizer: false
     # Optional: list of files (relative to project_root) that the generic agent

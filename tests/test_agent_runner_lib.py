@@ -198,6 +198,59 @@ class TestLoadEnv:
                 env = load_env(script_root, config)
         assert env["daemon_interval_sec"] == 90
 
+    def test_parse_json_logs_defaults_true(self, script_root: Path, config: AgentConfig):
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            env = load_env(script_root, config)
+        assert env["parse_json_logs"] is True
+
+    def test_parse_json_logs_false_when_set_in_config(self, script_root: Path):
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            parse_json_logs=False,
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            env = load_env(script_root, config)
+        assert env["parse_json_logs"] is False
+
+    def test_command_from_commands_yaml_used_when_set(self, script_root: Path):
+        # Write a commands.yaml in the script_root
+        commands_yaml = script_root / "commands.yaml"
+        commands_yaml.write_text(
+            "commands:\n"
+            "  custom: my-agent --foo bar __PROMPT__\n",
+            encoding="utf-8",
+        )
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            command="custom",
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {}, clear=False):
+                env = load_env(script_root, config)
+        assert env["agent_cmd"] == "my-agent --foo bar __PROMPT__"
+
+    def test_unknown_command_in_commands_yaml_exits(self, script_root: Path):
+        commands_yaml = script_root / "commands.yaml"
+        commands_yaml.write_text(
+            "commands:\n"
+            "  other: agent --flag\n",
+            encoding="utf-8",
+        )
+        config = AgentConfig(
+            project_root="/p",
+            default_prompt_file="prompts/x.md",
+            dir_prefix="",
+            command="missing",
+        )
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch.dict("os.environ", {}, clear=False):
+                with pytest.raises(SystemExit):
+                    load_env(script_root, config)
+
 
 class TestEnsureDirsAndState:
     def test_creates_dirs_and_state_file(self, script_root: Path, log):
@@ -337,6 +390,19 @@ class TestRunAgent:
         # Second log.error is for stderr; should contain truncation
         err_calls = [c for c in log.error.call_args_list if "..." in str(c)]
         assert len(err_calls) >= 1
+
+    def test_prompt_placeholder_replaced_in_command(self, script_root: Path, log):
+        with patch("agent_runner_lib.subprocess.Popen") as mock_popen:
+            proc = MagicMock()
+            proc.wait.return_value = None
+            proc.returncode = 0
+            proc.stderr = None
+            mock_popen.return_value = proc
+            code = run_agent("cmd --flag __PROMPT__ --other", "hi", script_root, None, log)
+        assert code == 0
+        call_cmd = mock_popen.call_args[0][0]
+        # prompt should be inserted in place of the placeholder
+        assert call_cmd == ["cmd", "--flag", "hi", "--other"]
 
 
 class TestRunSummarizer:
@@ -551,6 +617,47 @@ class TestRunOneCycle:
                         dir_prefix="",
                     )
         assert code == 0
+        mock_sum.assert_not_called()
+
+    def test_skips_parser_and_summarizer_when_parse_json_logs_false(self, script_root: Path, log):
+        sessions = script_root / "sessions"
+        transcripts = script_root / "transcripts"
+        memory_bank = script_root / "memory_bank"
+        for d in (sessions, transcripts, memory_bank):
+            d.mkdir(parents=True)
+        state_file = memory_bank / "state.md"
+        state_file.touch()
+        prompt_file = script_root / "prompt.md"
+        prompt_file.write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+        summarize_file = script_root / "sum.md"
+        summarize_file.write_text("{{TRANSCRIPT_PATH}} {{STATE_FILE_PATH}}")
+        env = {
+            "project_root": str(script_root),
+            "agent_cmd": "true",
+            "base_branch": "dev",
+            "use_summarizer": True,
+            "parse_json_logs": False,
+        }
+
+        with patch("agent_runner_lib.run_agent", return_value=0) as mock_agent:
+            with patch("agent_runner_lib.run_parser", return_value=0) as mock_parser:
+                with patch("agent_runner_lib.run_summarizer", return_value=0) as mock_sum:
+                    code = run_one_cycle(
+                        script_root_path=script_root,
+                        project_root=script_root,
+                        env=env,
+                        memory_bank_dir=memory_bank,
+                        sessions_dir=sessions,
+                        transcripts_dir=transcripts,
+                        state_file=state_file,
+                        prompt_file=prompt_file,
+                        summarize_prompt_file=summarize_file,
+                        log=log,
+                        dir_prefix="",
+                    )
+        assert code == 0
+        mock_agent.assert_called_once()
+        mock_parser.assert_not_called()
         mock_sum.assert_not_called()
 
 def _config_with_project_root(project_root: str, default_prompt_file: str = "prompts/agent_prompt.md") -> AgentConfig:

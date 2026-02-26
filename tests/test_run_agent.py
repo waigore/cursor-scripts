@@ -52,6 +52,8 @@ agents:
         assert name == "Coder"
         assert config.default_prompt_file == "prompts/coder.md"
         assert config.project_root == "/my/project"
+        # command is optional and should default to None when not provided
+        assert getattr(config, "command", None) is None
 
     def test_registry_loads_daemon_interval_sec_from_yaml(self, tmp_path: Path):
         yaml_path = tmp_path / "agents.yaml"
@@ -67,6 +69,21 @@ agents:
         registry = load_registry(yaml_path)
         config, _ = registry["coder"]
         assert config.daemon_interval_sec == 120
+
+    def test_registry_loads_command_field_when_present(self, tmp_path: Path):
+        yaml_path = tmp_path / "agents.yaml"
+        yaml_path.write_text("""
+agents:
+  coder:
+    name: Coder
+    project_root: /my/project
+    default_prompt_file: prompts/coder.md
+    dir_prefix: ""
+    command: custom
+""")
+        registry = load_registry(yaml_path)
+        config, _ = registry["coder"]
+        assert config.command == "custom"
 
     def test_name_optional_uses_agent_id(self, tmp_path: Path):
         yaml_path = tmp_path / "agents.yaml"
