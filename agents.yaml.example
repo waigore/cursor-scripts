@@ -54,6 +54,16 @@ agents:
     daemon_interval_sec: 300  # 5 minutes; handles and verifies open issues raised by the reviewer
     use_summarizer: false
 
+  qa:
+    name: QA Tester
+    project_root: ""  # required: set to the project path where this agent runs
+    default_prompt_file: prompts/qa_prompt.md
+    dir_prefix: "qa"
+    # command: default
+    # parse_json_logs: true
+    daemon_interval_sec: 1800  # 30 minutes; example interval for periodic QA
+    use_summarizer: false
+
   generic:
     name: Generic
     project_root: ""  # required: set to the project path where this agent runs
