@@ -17,6 +17,8 @@ from agent_runner_lib import (
     ensure_dirs_and_state,
     latest_transcript,
     load_env,
+    parse_cron_expr,
+    last_scheduled_time,
     read_state,
     resolve_path,
     run_agent,
@@ -493,6 +495,21 @@ class TestLatestTranscript:
         assert latest.name == "new.md"
 
 
+class TestCronHelpers:
+    def test_parse_cron_expr_simple_every_three_hours(self):
+        cron = parse_cron_expr("0 */3 * * *")
+        assert 0 in cron.minutes and len(cron.minutes) == 1
+        assert cron.hours == {0, 3, 6, 9, 12, 15, 18, 21}
+
+    def test_last_scheduled_time_uses_current_minute(self):
+        from datetime import datetime
+
+        cron = parse_cron_expr("* * * * *")
+        now = datetime(2026, 3, 16, 12, 34, 45)
+        last_time = last_scheduled_time(cron, now)
+        assert last_time == datetime(2026, 3, 16, 12, 34)
+
+
 class TestRunOneCycle:
     def test_returns_one_when_prompt_file_missing(
         self, script_root: Path, config: AgentConfig, log
@@ -722,4 +739,51 @@ class TestMain:
                         code = agent_runner_lib.main(config, "Test", script_root_path=tmp_path)
         assert code == 0
         assert len(cycles) >= 1
+
+    def test_daemon_uses_cron_schedule_when_present(self, tmp_path: Path):
+        import agent_runner_lib
+
+        agent_runner_lib._shutdown_requested = False
+        config = _config_with_project_root(str(tmp_path))
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "agent_prompt.md").write_text("{{STATE_FILE_PATH}} {{STATE_CONTENT}} {{BASE_BRANCH}}")
+
+        def fake_load_env(_script_root, _config):
+            return {
+                "project_root": str(tmp_path),
+                "agent_cmd": "true",
+                "base_branch": "dev",
+                "daemon_interval_sec": 60,
+                "use_summarizer": False,
+                "file_list": "",
+                "dir_prefix": "",
+                "memory_bank_dir": "memory_bank",
+                "sessions_dir": "sessions",
+                "transcripts_dir": "transcripts",
+                "prompt_file": "prompts/agent_prompt.md",
+                "parse_json_logs": True,
+                "cron_schedule": "0 * * * *",
+            }
+
+        runs: list[int] = []
+
+        def set_shutdown(**kwargs):
+            runs.append(1)
+            agent_runner_lib._shutdown_requested = True
+            return 0
+
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        fake_expected = datetime(2026, 3, 16, 12, 0, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+
+        with patch("agent_runner_lib.load_dotenv", MagicMock()):
+            with patch("agent_runner_lib.load_env", side_effect=fake_load_env):
+                with patch("agent_runner_lib.last_scheduled_time", return_value=fake_expected):
+                    with patch("agent_runner_lib.run_one_cycle", side_effect=set_shutdown):
+                        with patch("agent_runner_lib.time.sleep"):
+                            with patch("sys.argv", ["prog", "--daemon"]):
+                                code = agent_runner_lib.main(config, "Test", script_root_path=tmp_path)
+        assert code == 0
+        assert len(runs) == 1
 

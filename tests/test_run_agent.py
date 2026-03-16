@@ -70,6 +70,21 @@ agents:
         config, _ = registry["coder"]
         assert config.daemon_interval_sec == 120
 
+    def test_registry_loads_cron_schedule_from_yaml(self, tmp_path: Path):
+        yaml_path = tmp_path / "agents.yaml"
+        yaml_path.write_text("""
+agents:
+  coder:
+    name: Coder
+    project_root: /my/project
+    default_prompt_file: prompts/coder.md
+    dir_prefix: ""
+    cron_schedule: "0 */3 * * *"
+""")
+        registry = load_registry(yaml_path)
+        config, _ = registry["coder"]
+        assert config.cron_schedule == "0 */3 * * *"
+
     def test_registry_loads_command_field_when_present(self, tmp_path: Path):
         yaml_path = tmp_path / "agents.yaml"
         yaml_path.write_text("""

@@ -1,0 +1,14 @@
+[Unit]
+Description=Cursor Packager Agent (sync dev to build/app/android)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/clawd/cursor-scripts
+ExecStart=/usr/bin/env python3 /home/clawd/cursor-scripts/run_agent.py --agent packager-agent --daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+

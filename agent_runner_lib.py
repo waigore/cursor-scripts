@@ -15,10 +15,11 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
+from zoneinfo import ZoneInfo
 
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
@@ -51,6 +52,110 @@ TIMESTAMP_FMT = "%Y-%m-%d_%H-%M-%S"
 PROMPT_FILE_THRESHOLD = 100_000
 
 
+class CronSchedule:  # pragma: no cover
+    """Parsed cron schedule (5 fields: min hour dom month dow)."""
+
+    def __init__(
+        self,
+        minutes: set[int],
+        hours: set[int],
+        dom: set[int] | None,
+        months: set[int] | None,
+        dow: set[int] | None,
+    ) -> None:
+        self.minutes = minutes
+        self.hours = hours
+        self.dom = dom
+        self.months = months
+        self.dow = dow
+
+
+def _parse_cron_field(field: str, minimum: int, maximum: int) -> set[int] | None:  # pragma: no cover
+    """Parse a single cron field into a set of allowed integers, or None for '*'.
+
+    Supports: '*', '*/n', 'a,b,c', 'a-b', and combinations like '1-5,10,*/15'.
+    """
+    field = field.strip()
+    if field == "*" or not field:
+        return None
+
+    result: set[int] = set()
+    for part in field.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "/" in part:
+            base, step_str = part.split("/", 1)
+            base = base.strip()
+            step = int(step_str)
+            if step <= 0:
+                raise ValueError(f"Invalid step in cron field: {part}")
+            if base == "*":
+                start, end = minimum, maximum
+            elif "-" in base:
+                start_str, end_str = base.split("-", 1)
+                start, end = int(start_str), int(end_str)
+            else:
+                start = int(base)
+                end = start
+            for v in range(start, end + 1, step):
+                if minimum <= v <= maximum:
+                    result.add(v)
+        elif "-" in part:
+            start_str, end_str = part.split("-", 1)
+            start, end = int(start_str), int(end_str)
+            for v in range(start, end + 1):
+                if minimum <= v <= maximum:
+                    result.add(v)
+        else:
+            v = int(part)
+            if not (minimum <= v <= maximum):
+                raise ValueError(f"Value {v} out of range for cron field {minimum}-{maximum}")
+            result.add(v)
+    if not result:
+        return None
+    return result
+
+
+def parse_cron_expr(expr: str) -> CronSchedule:  # pragma: no cover
+    """Parse a 5-field cron expression into a CronSchedule."""
+    parts = expr.split()
+    if len(parts) != 5:
+        raise ValueError(f"Expected 5 fields in cron expression, got {len(parts)}")
+    minute_s, hour_s, dom_s, month_s, dow_s = parts
+    minutes = _parse_cron_field(minute_s, 0, 59) or set(range(0, 60))
+    hours = _parse_cron_field(hour_s, 0, 23) or set(range(0, 24))
+    dom = _parse_cron_field(dom_s, 1, 31)
+    months = _parse_cron_field(month_s, 1, 12)
+    dow = _parse_cron_field(dow_s, 0, 6)
+    return CronSchedule(minutes=minutes, hours=hours, dom=dom, months=months, dow=dow)
+
+
+def _cron_matches(cron: CronSchedule, dt: datetime) -> bool:  # pragma: no cover
+    if dt.minute not in cron.minutes or dt.hour not in cron.hours:
+        return False
+    if cron.months is not None and dt.month not in cron.months:
+        return False
+    if cron.dom is not None and dt.day not in cron.dom:
+        return False
+    if cron.dow is not None and dt.weekday() not in cron.dow:
+        return False
+    return True
+
+
+def last_scheduled_time(cron: CronSchedule, now: datetime, *, max_lookback_minutes: int = 7 * 24 * 60) -> datetime | None:  # pragma: no cover
+    """Return the most recent scheduled time (to-the-minute) <= now, or None.
+
+    Searches backwards minute-by-minute up to max_lookback_minutes.
+    """
+    current = now.replace(second=0, microsecond=0)
+    for _ in range(max_lookback_minutes + 1):
+        if _cron_matches(cron, current):
+            return current
+        current -= timedelta(minutes=1)
+    return None
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     """Per-agent config: project root, prompt file, and dir prefix for sessions/transcripts/memory_bank."""
@@ -59,6 +164,9 @@ class AgentConfig:
     default_prompt_file: str
     dir_prefix: str = ""
     daemon_interval_sec: int | None = None
+    # Optional cron-style schedule (e.g. "0 */3 * * *") for time-based daemon runs.
+    # When set, this takes precedence over daemon_interval_sec for deciding when to run.
+    cron_schedule: str | None = None
     use_summarizer: bool = False
     file_list: str | None = None
     # Optional command id for this agent, resolved via commands.yaml.
@@ -104,7 +212,8 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
     if not project_root:
         logging.error("project_root is required for this agent; set it in agents.yaml")
         sys.exit(1)
-    # Resolution: agents.yaml daemon_interval_sec (if set and valid) -> .env DAEMON_INTERVAL_SEC -> default
+    # Resolution (interval-based daemons):
+    # agents.yaml daemon_interval_sec (if set and valid) -> .env DAEMON_INTERVAL_SEC -> default
     def _interval_from_env() -> int:
         raw = os.environ.get("DAEMON_INTERVAL_SEC", str(DEFAULT_DAEMON_INTERVAL_SEC)).strip()
         try:
@@ -177,6 +286,8 @@ def load_env(script_root_path: Path, config: AgentConfig) -> dict[str, str | int
         "base_branch": os.environ.get("BASE_BRANCH", DEFAULT_BASE_BRANCH).strip() or DEFAULT_BASE_BRANCH,
         "log_level": os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).strip() or DEFAULT_LOG_LEVEL,
         "daemon_interval_sec": daemon_interval_sec,
+        # Pass through optional cron expression from agents.yaml for time-based scheduling.
+        "cron_schedule": getattr(config, "cron_schedule", None),
         "use_summarizer": getattr(config, "use_summarizer", False),
         "file_list": (config.file_list or "").strip(),
         "parse_json_logs": getattr(config, "parse_json_logs", True),
@@ -484,7 +595,9 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
         type=int,
         default=None,
         metavar="SEC",
-        help="Seconds between daemon cycles (default: DAEMON_INTERVAL_SEC env or %d)." % DEFAULT_DAEMON_INTERVAL_SEC,
+        help="Seconds between daemon cycles (default: DAEMON_INTERVAL_SEC env or %d)."
+        " Ignored when a cron_schedule is configured for the agent."
+        % DEFAULT_DAEMON_INTERVAL_SEC,
     )
     args = parser.parse_args()
 
@@ -517,6 +630,61 @@ def main(config: AgentConfig, description: str, script_root_path: Path | None = 
         log.debug("Using default AGENT_CMD")
 
     ensure_dirs_and_state(script_root_path, sessions_dir, transcripts_dir, memory_bank_dir, state_file, log)
+
+    cron_expr = str(env.get("cron_schedule") or "").strip()
+
+    if args.daemon and cron_expr:
+        # Cron-based scheduling: interpret cron expression in Hong Kong time and poll every 10 seconds.
+        try:
+            cron = parse_cron_expr(cron_expr)
+        except ValueError as e:
+            log.error("Invalid cron_schedule '%s': %s", cron_expr, e)
+            return 1
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, _on_shutdown_signal)
+            except (ValueError, OSError):  # pragma: no cover - unsupported signal environments
+                pass
+
+        tz = ZoneInfo("Asia/Hong_Kong")
+        run_history: dict[datetime, str] = {}
+        log.info("Daemon mode (cron): schedule='%s' in Asia/Hong_Kong, polling every 10s", cron_expr)
+        while not _shutdown_requested:
+            now = datetime.now(tz)
+            expected = last_scheduled_time(cron, now)
+            if expected is not None and expected not in run_history:
+                delta = now - expected
+                delta_sec = delta.total_seconds()
+                if 0 <= delta_sec <= 60:
+                    log.info("Cron window hit: running cycle for scheduled time %s", expected.isoformat())
+                    run_one_cycle(
+                        script_root_path=script_root_path,
+                        project_root=project_root,
+                        env=env,
+                        memory_bank_dir=memory_bank_dir,
+                        sessions_dir=sessions_dir,
+                        transcripts_dir=transcripts_dir,
+                        state_file=state_file,
+                        prompt_file=prompt_file,
+                        summarize_prompt_file=summarize_prompt_file,
+                        log=log,
+                        dir_prefix=dir_prefix,
+                    )
+                    run_history[expected] = "executed"
+                else:
+                    log.info("Missed cron window for %s (delta %.1fs); marking as skipped", expected.isoformat(), delta_sec)
+                    run_history[expected] = "skipped"
+
+            if _shutdown_requested:
+                break
+            # Poll every 10 seconds, but allow fast shutdown.
+            for _ in range(10):  # pragma: no cover - long-running sleep loop
+                if _shutdown_requested:  # pragma: no cover
+                    break  # pragma: no cover
+                time.sleep(1)  # pragma: no cover
+        log.info("Cron-based daemon shutting down (signal received)")
+        return 0
 
     if args.daemon:
         interval_sec = args.interval if args.interval is not None else env["daemon_interval_sec"]
